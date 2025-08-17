@@ -3,12 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { Shield, Zap, TrendingUp, Lock, CheckCircle, ArrowRight, AlertCircle } from 'lucide-react';
 
-interface PriceDataPoint {
-  price: number;
-  time: number;
-  date: string;
-}
-
 const XORJLandingPage = () => {
   const [email, setEmail] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -16,7 +10,7 @@ const XORJLandingPage = () => {
   const [error, setError] = useState('');
   const [solPrice, setSolPrice] = useState<number | null>(null);
   const [priceChange, setPriceChange] = useState<number | null>(null);
-  const [priceHistory, setPriceHistory] = useState<PriceDataPoint[]>([]);
+  const [priceHistory, setPriceHistory] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [selectedTimeframe, setSelectedTimeframe] = useState('30d');
   const [timeframeChange, setTimeframeChange] = useState<number | null>(null);
@@ -99,7 +93,7 @@ const XORJLandingPage = () => {
       console.log(`Using simulated ${timeframeKey} SOL price history`);
       
       const generateTimeframeData = (timeframeKey: string) => {
-        const data: PriceDataPoint[] = [];
+        const data = [];
         const now = new Date();
         let dataPoints, startPrice, endPrice, volatilityFactor;
         
@@ -314,72 +308,31 @@ const XORJLandingPage = () => {
     );
   };
 
-  // FIXED SUPABASE INTEGRATION - Multiple approaches for reliability
   const submitEmailToSupabase = async (emailAddress: string) => {
-    console.log('🚀 ATTEMPTING SUPABASE SUBMISSION');
-    console.log('Email to submit:', emailAddress);
+    console.log('🚀 SUBMITTING TO PRODUCTION SUPABASE');
     
     const SUPABASE_URL = 'https://yywoynugnrkvpunnvvla.supabase.co';
+    const SERVICE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d295bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NTM2NjYzNCwiZXhwIjoyMDcwOTQyNjM0fQ.ahWp9DgWXU4S4VI3Y_GtYN2rF32JAww8tDs2idoyRy4';
     
-    // Method 1: Service Role Key
-    const serviceRoleHeaders: Record<string, string> = {
-      'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d285bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NTM2NjYzNCwiZXhwIjoyMDcwOTQyNjM0fQ.ahWp9DgWXU4S4VI3Y_GtYN2rF32JAww8tDs2idoyRy4',
-      'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d285bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NTM2NjYzNCwiZXhwIjoyMDcwOTQyNjM0fQ.ahWp9DgWXU4S4VI3Y_GtYN2rF32JAww8tDs2idoyRy4',
-      'Content-Type': 'application/json'
-    };
-
-    // Method 2: Anon Key
-    const anonHeaders: Record<string, string> = {
-      'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d285bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUzNjY2MzQsImV4cCI6MjA3MDk0MjYzNH0.VYhT1Utp3NGFmCmFZH6Fvt75axIDCOCajDPZJKVMYpQ',
-      'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d285bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUzNjY2MzQsImV4cCI6MjA3MDk0MjYzNH0.VYhT1Utp3NGFmCmFZH6Fvt75axIDCOCajDPZJKVMYpQ',
-      'Content-Type': 'application/json',
-      'Prefer': 'return=minimal'
-    };
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/waitlist_signups`, {
+      method: 'POST',
+      headers: {
+        'apikey': SERVICE_KEY,
+        'Authorization': `Bearer ${SERVICE_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ email: emailAddress })
+    });
     
-    // Try multiple authentication methods
-    const authMethods = [
-      { name: 'Service Role', headers: serviceRoleHeaders },
-      { name: 'Anon Key', headers: anonHeaders }
-    ];
-    
-    // Try each authentication method
-    for (const method of authMethods) {
-      try {
-        console.log(`🔑 Trying ${method.name} authentication`);
-        
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/waitlist_signups`, {
-          method: 'POST',
-          headers: method.headers,
-          body: JSON.stringify({ email: emailAddress })
-        });
-        
-        console.log(`${method.name} Response status:`, response.status);
-        
-        if (response.status === 201) {
-          console.log(`✅ SUCCESS with ${method.name}!`);
-          return { success: true };
-        }
-        
-        if (response.status === 409) {
-          console.log(`⚠️ Duplicate email detected with ${method.name}`);
-          throw new Error('This email is already on the waitlist');
-        }
-        
-        // Log the error but try next method
-        const responseText = await response.text();
-        console.log(`❌ ${method.name} failed:`, responseText);
-        
-      } catch (err) {
-        console.log(`❌ ${method.name} error:`, err);
-        if (err instanceof Error && err.message.includes('already on the waitlist')) {
-          throw err; // Re-throw duplicate errors immediately
-        }
-        // Continue to next method for other errors
+    if (response.status === 201) {
+      return { success: true };
+    } else {
+      const responseText = await response.text();
+      if (responseText.includes('duplicate') || response.status === 409) {
+        throw new Error('This email is already on the waitlist');
       }
+      throw new Error('Unable to save email. Please try again.');
     }
-    
-    // If all methods failed, throw error
-    throw new Error('Unable to save email. Please try again later.');
   };
 
   const handleWaitlistSubmit = async () => {
@@ -585,6 +538,8 @@ const XORJLandingPage = () => {
         </div>
       </section>
 
+      {/* Rest of the component continues... */}
+      {/* I'll include the rest in the next part due to length */}
       {/* Solution Section */}
       <section className="px-6 py-20">
         <div className="max-w-6xl mx-auto">
