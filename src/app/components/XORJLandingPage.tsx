@@ -89,7 +89,7 @@ const XORJLandingPage = () => {
         
         setIsLoadingHistory(false);
       }
-    } catch (error) {
+    } catch {
       console.log(`Using simulated ${timeframeKey} SOL price history`);
       
       const generateTimeframeData = (timeframeKey: string) => {
@@ -189,7 +189,7 @@ const XORJLandingPage = () => {
         setSolPrice(data.solana.usd);
         setPriceChange(data.solana.usd_24h_change);
       }
-    } catch (error) {
+    } catch {
       const lastHistoricalPrice = priceHistory[priceHistory.length - 1]?.price || 98.45;
       const variation = (Math.random() - 0.5) * 2;
       setSolPrice(lastHistoricalPrice + variation);
@@ -369,7 +369,7 @@ const XORJLandingPage = () => {
       setError(err instanceof Error ? err.message : 'An error occurred');
       
       trackEvent('waitlist_signup_error', {
-        error_message: err.message,
+        error_message: err instanceof Error ? err.message : 'Unknown error',
         email_attempted: email.split('@')[1]
       });
     } finally {
@@ -510,7 +510,7 @@ const XORJLandingPage = () => {
       <section className="px-6 py-20 bg-slate-800/50">
         <div className="max-w-6xl mx-auto">
           <h2 className="text-4xl md:text-5xl font-bold text-white text-center mb-16">
-            Solana Investing Shouldn't Be This Hard
+            Solana Investing Shouldn&apos;t Be This Hard
           </h2>
           
           <div className="grid md:grid-cols-3 gap-8">
@@ -534,7 +534,7 @@ const XORJLandingPage = () => {
               <div className="text-orange-400 text-4xl mb-4">💸</div>
               <h3 className="text-xl font-semibold text-white mb-4">Emotional Trading</h3>
               <p className="text-slate-300">
-                FOMO into new Solana launches and panic selling during volatility, missing the ecosystem's long-term growth.
+                FOMO into new Solana launches and panic selling during volatility, missing the ecosystem&apos;s long-term growth.
               </p>
             </div>
           </div>
@@ -571,7 +571,7 @@ const XORJLandingPage = () => {
                 <div>
                   <h3 className="text-xl font-semibold text-white mb-2">Automated Rebalancing</h3>
                   <p className="text-slate-300">
-                    Dynamic portfolio adjustments leveraging Solana's high-speed transactions and low fees for efficient rebalancing based on market conditions and your goals.
+                    Dynamic portfolio adjustments leveraging Solana&apos;s high-speed transactions and low fees for efficient rebalancing based on market conditions and your goals.
                   </p>
                 </div>
               </div>
@@ -637,7 +637,7 @@ const XORJLandingPage = () => {
             <div className="space-y-6">
               <h3 className="text-2xl font-semibold text-white">Non-Custodial Architecture</h3>
               <p className="text-slate-300 text-lg">
-                Unlike traditional funds, you maintain complete control of your Solana assets. Our smart contracts execute trades on your behalf using Solana's native programs, but your SOL and SPL tokens never leave your wallet.
+                Unlike traditional funds, you maintain complete control of your Solana assets. Our smart contracts execute trades on your behalf using Solana&apos;s native programs, but your SOL and SPL tokens never leave your wallet.
               </p>
               
               <div className="space-y-4">
@@ -747,9 +747,9 @@ const XORJLandingPage = () => {
             ) : (
               <div className="space-y-6">
                 <CheckCircle className="h-16 w-16 text-green-400 mx-auto" />
-                <h3 className="text-2xl font-semibold text-white">You're In!</h3>
+                <h3 className="text-2xl font-semibold text-white">You&apos;re In!</h3>
                 <p className="text-slate-300">
-                  Thanks for joining the waitlist. We'll notify you as soon as we launch.
+                  Thanks for joining the waitlist. We&apos;ll notify you as soon as we launch.
                 </p>
                 <button
                   onClick={() => {
