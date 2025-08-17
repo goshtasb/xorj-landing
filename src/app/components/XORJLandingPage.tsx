@@ -327,14 +327,19 @@ const XORJLandingPage = () => {
       body: JSON.stringify({ email: emailAddress })
     });
     
+    console.log('Response status:', response.status);
+    console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+    
     if (response.status === 201) {
       return { success: true };
     } else {
       const responseText = await response.text();
+      console.log('Response text:', responseText);
+      
       if (responseText.includes('duplicate') || response.status === 409) {
         throw new Error('This email is already on the waitlist');
       }
-      throw new Error('Unable to save email. Please try again.');
+      throw new Error(`Unable to save email. Please try again. (Status: ${response.status})`);
     }
   };
 
