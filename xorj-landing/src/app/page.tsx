@@ -1,4 +1,4 @@
-import XORJLandingPage from './components/XORJLandingPage.tsx'
+import XORJLandingPage from './components/XORJLandingPage'
 
 export default function Home() {
   return <XORJLandingPage />
