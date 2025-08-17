@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react'; 
+import React, { useState, useEffect } from 'react';
 import { Shield, Zap, TrendingUp, Lock, CheckCircle, ArrowRight, AlertCircle } from 'lucide-react';
 
 interface PriceDataPoint {
@@ -21,23 +21,53 @@ const XORJLandingPage = () => {
   const [selectedTimeframe, setSelectedTimeframe] = useState('30d');
   const [timeframeChange, setTimeframeChange] = useState<number | null>(null);
 
-  const timeframes = useMemo(() => [
+  const timeframes = [
     { key: '24h', label: '24H', days: '1', interval: 'hourly' },
     { key: '7d', label: '7D', days: '7', interval: 'hourly' },
     { key: '30d', label: '1M', days: '30', interval: 'daily' },
     { key: '90d', label: '3M', days: '90', interval: 'daily' },
     { key: '365d', label: '1Y', days: '365', interval: 'daily' },
     { key: 'max', label: 'MAX', days: 'max', interval: 'daily' }
-  ], []);
+  ];
 
-  const trackEvent = useCallback((_eventName: string) => {
+  useEffect(() => {
     if (typeof window !== 'undefined') {
-      // In production, replace with actual analytics service
-      // console.log('Analytics Event:', _eventName);
+      console.log('Analytics initialized');
+      trackEvent('page_view', { page: 'landing_page' });
+      
+      fetchHistoricalData(selectedTimeframe);
+      fetchCurrentPrice();
+      
+      const priceInterval = setInterval(fetchCurrentPrice, 30000);
+      
+      return () => clearInterval(priceInterval);
     }
   }, []);
 
-  const fetchHistoricalData = useCallback(async (timeframeKey: string) => {
+  useEffect(() => {
+    if (selectedTimeframe) {
+      fetchHistoricalData(selectedTimeframe);
+    }
+  }, [selectedTimeframe]);
+
+  const trackEvent = (eventName: string, properties = {}) => {
+    if (typeof window !== 'undefined') {
+      console.log('Analytics Event:', eventName, properties);
+    }
+  };
+
+  const validateEmail = (email: string) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
+
+  const handleTimeframeChange = (timeframe: string) => {
+    setSelectedTimeframe(timeframe);
+    setIsLoadingHistory(true);
+    trackEvent('chart_timeframe_change', { timeframe });
+  };
+
+  const fetchHistoricalData = async (timeframeKey: string) => {
     try {
       const timeframe = timeframes.find(t => t.key === timeframeKey);
       if (!timeframe) return;
@@ -45,14 +75,9 @@ const XORJLandingPage = () => {
       const { days, interval } = timeframe;
       
       const response = await fetch(`https://api.coingecko.com/api/v3/coins/solana/market_chart?vs_currency=usd&days=${days}&interval=${interval}`);
-      
-      if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`);
-      }
-      
       const data = await response.json();
       
-      if (data.prices && Array.isArray(data.prices)) {
+      if (data.prices) {
         const historicalPrices = data.prices.map(([timestamp, price]: [number, number]) => ({
           price: price,
           time: timestamp,
@@ -69,11 +94,10 @@ const XORJLandingPage = () => {
         }
         
         setIsLoadingHistory(false);
-      } else {
-        throw new Error('Invalid data format received from API');
       }
-    } catch {
-      // Fallback to simulated data
+    } catch (error) {
+      console.log(`Using simulated ${timeframeKey} SOL price history`);
+      
       const generateTimeframeData = (timeframeKey: string) => {
         const data: PriceDataPoint[] = [];
         const now = new Date();
@@ -160,61 +184,23 @@ const XORJLandingPage = () => {
       
       setIsLoadingHistory(false);
     }
-  }, [timeframes]);
+  };
 
-  const fetchCurrentPrice = useCallback(async () => {
+  const fetchCurrentPrice = async () => {
     try {
       const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd&include_24hr_change=true');
-      
-      if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`);
-      }
-      
       const data = await response.json();
       
-      if (data.solana && typeof data.solana.usd === 'number') {
+      if (data.solana) {
         setSolPrice(data.solana.usd);
-        setPriceChange(data.solana.usd_24h_change || 0);
-      } else {
-        throw new Error('Invalid data format received from API');
+        setPriceChange(data.solana.usd_24h_change);
       }
-    } catch {
-      // Fallback to simulated data
+    } catch (error) {
       const lastHistoricalPrice = priceHistory[priceHistory.length - 1]?.price || 98.45;
       const variation = (Math.random() - 0.5) * 2;
       setSolPrice(lastHistoricalPrice + variation);
       setPriceChange((Math.random() - 0.3) * 8);
     }
-  }, [priceHistory]);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      trackEvent('page_view');
-      
-      fetchHistoricalData(selectedTimeframe);
-      fetchCurrentPrice();
-      
-      const priceInterval = setInterval(fetchCurrentPrice, 30000);
-      
-      return () => clearInterval(priceInterval);
-    }
-  }, [selectedTimeframe, trackEvent, fetchHistoricalData, fetchCurrentPrice]);
-
-  useEffect(() => {
-    if (selectedTimeframe) {
-      fetchHistoricalData(selectedTimeframe);
-    }
-  }, [selectedTimeframe, fetchHistoricalData]);
-
-  const validateEmail = (email: string) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-  };
-
-  const handleTimeframeChange = (timeframe: string) => {
-    setSelectedTimeframe(timeframe);
-    setIsLoadingHistory(true);
-    trackEvent('chart_timeframe_change');
   };
 
   const generateMiniChart = () => {
@@ -237,7 +223,6 @@ const XORJLandingPage = () => {
       if (priceHistory.length === 0) return { start: '', end: '' };
       
       const firstPoint = priceHistory[0];
-      if (!firstPoint) return { start: '', end: '' };
       
       switch (selectedTimeframe) {
         case '24h':
@@ -329,38 +314,72 @@ const XORJLandingPage = () => {
     );
   };
 
+  // FIXED SUPABASE INTEGRATION - Multiple approaches for reliability
   const submitEmailToSupabase = async (emailAddress: string) => {
-    const SUPABASE_URL = 'https://yywoynugnrkvpunnvvla.supabase.co';
-    const SERVICE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d285bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NTM2NjYzNCwiZXhwIjoyMDcwOTQyNjM0fQ.ahWp9DgWXU4S4VI3Y_GtYN2rF32JAww8tDs2idoyRy4';
+    console.log('🚀 ATTEMPTING SUPABASE SUBMISSION');
+    console.log('Email to submit:', emailAddress);
     
-    try {
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/waitlist_signups`, {
-        method: 'POST',
-        headers: {
-          'apikey': SERVICE_KEY,
-          'Authorization': `Bearer ${SERVICE_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ email: emailAddress })
-      });
-      
-      if (response.status === 201) {
-        return { success: true };
-      } else if (response.status === 409) {
-        throw new Error('This email is already on the waitlist');
-      } else {
-        const responseText = await response.text();
-        if (responseText.includes('duplicate')) {
+    const SUPABASE_URL = 'https://yywoynugnrkvpunnvvla.supabase.co';
+    
+    // Method 1: Service Role Key
+    const serviceRoleHeaders: Record<string, string> = {
+      'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d285bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NTM2NjYzNCwiZXhwIjoyMDcwOTQyNjM0fQ.ahWp9DgWXU4S4VI3Y_GtYN2rF32JAww8tDs2idoyRy4',
+      'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d285bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NTM2NjYzNCwiZXhwIjoyMDcwOTQyNjM0fQ.ahWp9DgWXU4S4VI3Y_GtYN2rF32JAww8tDs2idoyRy4',
+      'Content-Type': 'application/json'
+    };
+
+    // Method 2: Anon Key
+    const anonHeaders: Record<string, string> = {
+      'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d285bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUzNjY2MzQsImV4cCI6MjA3MDk0MjYzNH0.VYhT1Utp3NGFmCmFZH6Fvt75axIDCOCajDPZJKVMYpQ',
+      'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d285bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUzNjY2MzQsImV4cCI6MjA3MDk0MjYzNH0.VYhT1Utp3NGFmCmFZH6Fvt75axIDCOCajDPZJKVMYpQ',
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal'
+    };
+    
+    // Try multiple authentication methods
+    const authMethods = [
+      { name: 'Service Role', headers: serviceRoleHeaders },
+      { name: 'Anon Key', headers: anonHeaders }
+    ];
+    
+    // Try each authentication method
+    for (const method of authMethods) {
+      try {
+        console.log(`🔑 Trying ${method.name} authentication`);
+        
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/waitlist_signups`, {
+          method: 'POST',
+          headers: method.headers,
+          body: JSON.stringify({ email: emailAddress })
+        });
+        
+        console.log(`${method.name} Response status:`, response.status);
+        
+        if (response.status === 201) {
+          console.log(`✅ SUCCESS with ${method.name}!`);
+          return { success: true };
+        }
+        
+        if (response.status === 409) {
+          console.log(`⚠️ Duplicate email detected with ${method.name}`);
           throw new Error('This email is already on the waitlist');
         }
-        throw new Error(`Unable to save email. Please try again. (Status: ${response.status})`);
+        
+        // Log the error but try next method
+        const responseText = await response.text();
+        console.log(`❌ ${method.name} failed:`, responseText);
+        
+      } catch (err) {
+        console.log(`❌ ${method.name} error:`, err);
+        if (err instanceof Error && err.message.includes('already on the waitlist')) {
+          throw err; // Re-throw duplicate errors immediately
+        }
+        // Continue to next method for other errors
       }
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        throw error;
-      }
-      throw new Error('Network error. Please check your connection and try again.');
     }
+    
+    // If all methods failed, throw error
+    throw new Error('Unable to save email. Please try again later.');
   };
 
   const handleWaitlistSubmit = async () => {
@@ -382,15 +401,21 @@ const XORJLandingPage = () => {
       
       await submitEmailToSupabase(normalizedEmail);
       
-      trackEvent('waitlist_signup');
+      trackEvent('waitlist_signup', {
+        email_domain: normalizedEmail.split('@')[1],
+        timestamp: new Date().toISOString()
+      });
       
       setIsSubmitted(true);
       setEmail('');
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred. Please try again.';
-      setError(errorMessage);
+    } catch (err: any) {
+      console.error('Submission error:', err);
+      setError(err.message);
       
-      trackEvent('waitlist_signup_error');
+      trackEvent('waitlist_signup_error', {
+        error_message: err.message,
+        email_attempted: email.split('@')[1]
+      });
     } finally {
       setIsLoading(false);
     }
@@ -433,7 +458,7 @@ const XORJLandingPage = () => {
           <div className="flex flex-col sm:flex-row gap-6 justify-center items-center mb-16">
             <button 
               onClick={() => {
-                trackEvent('hero_cta_click');
+                trackEvent('hero_cta_click', { button: 'join_waitlist' });
                 document.getElementById('waitlist-form')?.scrollIntoView({ behavior: 'smooth' });
               }}
               className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-8 py-4 rounded-xl text-lg font-semibold transition-all transform hover:scale-105 shadow-2xl"
@@ -529,7 +554,7 @@ const XORJLandingPage = () => {
       <section className="px-6 py-20 bg-slate-800/50">
         <div className="max-w-6xl mx-auto">
           <h2 className="text-4xl md:text-5xl font-bold text-white text-center mb-16">
-            Solana Investing Shouldn&apos;t Be This Hard
+            Solana Investing Shouldn't Be This Hard
           </h2>
           
           <div className="grid md:grid-cols-3 gap-8">
@@ -553,7 +578,7 @@ const XORJLandingPage = () => {
               <div className="text-orange-400 text-4xl mb-4">💸</div>
               <h3 className="text-xl font-semibold text-white mb-4">Emotional Trading</h3>
               <p className="text-slate-300">
-                FOMO into new Solana launches and panic selling during volatility, missing the ecosystem&apos;s long-term growth.
+                FOMO into new Solana launches and panic selling during volatility, missing the ecosystem's long-term growth.
               </p>
             </div>
           </div>
@@ -588,7 +613,7 @@ const XORJLandingPage = () => {
                 <div>
                   <h3 className="text-xl font-semibold text-white mb-2">Automated Rebalancing</h3>
                   <p className="text-slate-300">
-                    Dynamic portfolio adjustments leveraging Solana&apos;s high-speed transactions and low fees for efficient rebalancing based on market conditions and your goals.
+                    Dynamic portfolio adjustments leveraging Solana's high-speed transactions and low fees for efficient rebalancing based on market conditions and your goals.
                   </p>
                 </div>
               </div>
@@ -654,7 +679,7 @@ const XORJLandingPage = () => {
             <div className="space-y-6">
               <h3 className="text-2xl font-semibold text-white">Non-Custodial Architecture</h3>
               <p className="text-slate-300 text-lg">
-                Unlike traditional funds, you maintain complete control of your Solana assets. Our smart contracts execute trades on your behalf using Solana&apos;s native programs, but your SOL and SPL tokens never leave your wallet.
+                Unlike traditional funds, you maintain complete control of your Solana assets. Our smart contracts execute trades on your behalf using Solana's native programs, but your SOL and SPL tokens never leave your wallet.
               </p>
               
               <div className="space-y-4">
@@ -690,118 +715,118 @@ const XORJLandingPage = () => {
                     <div className="h-2 w-2 bg-green-400 rounded-full"></div>
                     <span className="text-slate-300 text-sm">Multi-signature protection</span>
                   </div>
-                 <div className="flex items-center space-x-3">
-                   <div className="h-2 w-2 bg-green-400 rounded-full"></div>
-                   <span className="text-slate-300 text-sm">24/7 Solana network monitoring</span>
-                 </div>
-               </div>
-             </div>
-           </div>
-         </div>
-       </div>
-     </section>
+                  <div className="flex items-center space-x-3">
+                    <div className="h-2 w-2 bg-green-400 rounded-full"></div>
+                    <span className="text-slate-300 text-sm">24/7 Solana network monitoring</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
-     {/* Call to Action Section */}
-     <section className="px-6 py-20">
-       <div className="max-w-4xl mx-auto text-center">
-         <h2 className="text-4xl md:text-5xl font-bold text-white mb-8">
-           Ready to Automate Your Solana Success?
-         </h2>
-         <p className="text-xl text-slate-300 mb-12">
-           Join thousands of smart investors riding the Solana wave with AI precision.
-         </p>
-         
-         <div id="waitlist-form" className="bg-slate-800/50 rounded-2xl p-8 border border-slate-700 max-w-md mx-auto">
-           {!isSubmitted ? (
-             <div className="space-y-6">
-               <h3 className="text-2xl font-semibold text-white">Join the Waitlist</h3>
-               <p className="text-slate-300">Be the first to access our AI-powered Solana vault.</p>
-               
-               <div className="space-y-4">
-                 <div>
-                   <input
-                     type="email"
-                     placeholder="Enter your email address"
-                     value={email}
-                     onChange={(e) => {
-                       setEmail(e.target.value);
-                       if (error) setError('');
-                     }}
-                     className={`w-full px-4 py-3 bg-slate-900 border ${
-                       error ? 'border-red-500' : 'border-slate-600'
-                     } rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 ${
-                       error ? 'focus:ring-red-500' : 'focus:ring-purple-500'
-                     } transition-colors`}
-                   />
-                   {error && (
-                     <div className="mt-2 flex items-center space-x-2 text-red-400">
-                       <AlertCircle className="h-4 w-4" />
-                       <span className="text-sm">{error}</span>
-                     </div>
-                   )}
-                 </div>
-                 
-                 <button
-                   onClick={handleWaitlistSubmit}
-                   disabled={isLoading}
-                   className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:from-slate-600 disabled:to-slate-700 text-white py-3 rounded-lg font-semibold transition-all transform hover:scale-105 disabled:transform-none disabled:cursor-not-allowed"
-                 >
-                   {isLoading ? (
-                     <div className="flex items-center justify-center space-x-2">
-                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                       <span>Joining...</span>
-                     </div>
-                   ) : (
-                     'Reserve My Spot'
-                   )}
-                 </button>
-               </div>
-               
-               <p className="text-sm text-slate-400">
-                 No spam. Unsubscribe anytime. Early access guaranteed.
-               </p>
-             </div>
-           ) : (
-             <div className="space-y-6">
-               <CheckCircle className="h-16 w-16 text-green-400 mx-auto" />
-                               <h3 className="text-2xl font-semibold text-white">You&apos;re In!</h3>
-               <p className="text-slate-300">
-                 Thanks for joining the waitlist. We&apos;ll notify you as soon as we launch.
-               </p>
-               <button
-                 onClick={() => {
-                   setIsSubmitted(false);
-                   setEmail('');
-                   setError('');
-                   trackEvent('waitlist_reset');
-                 }}
-                 className="text-purple-400 hover:text-purple-300 text-sm underline transition-colors"
-               >
-                 Add another email
-               </button>
-             </div>
-           )}
-         </div>
-       </div>
-     </section>
+      {/* Call to Action Section */}
+      <section className="px-6 py-20">
+        <div className="max-w-4xl mx-auto text-center">
+          <h2 className="text-4xl md:text-5xl font-bold text-white mb-8">
+            Ready to Automate Your Solana Success?
+          </h2>
+          <p className="text-xl text-slate-300 mb-12">
+            Join thousands of smart investors riding the Solana wave with AI precision.
+          </p>
+          
+          <div id="waitlist-form" className="bg-slate-800/50 rounded-2xl p-8 border border-slate-700 max-w-md mx-auto">
+            {!isSubmitted ? (
+              <div className="space-y-6">
+                <h3 className="text-2xl font-semibold text-white">Join the Waitlist</h3>
+                <p className="text-slate-300">Be the first to access our AI-powered Solana vault.</p>
+                
+                <div className="space-y-4">
+                  <div>
+                    <input
+                      type="email"
+                      placeholder="Enter your email address"
+                      value={email}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        if (error) setError('');
+                      }}
+                      className={`w-full px-4 py-3 bg-slate-900 border ${
+                        error ? 'border-red-500' : 'border-slate-600'
+                      } rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 ${
+                        error ? 'focus:ring-red-500' : 'focus:ring-purple-500'
+                      } transition-colors`}
+                    />
+                    {error && (
+                      <div className="mt-2 flex items-center space-x-2 text-red-400">
+                        <AlertCircle className="h-4 w-4" />
+                        <span className="text-sm">{error}</span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <button
+                    onClick={handleWaitlistSubmit}
+                    disabled={isLoading}
+                    className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:from-slate-600 disabled:to-slate-700 text-white py-3 rounded-lg font-semibold transition-all transform hover:scale-105 disabled:transform-none disabled:cursor-not-allowed"
+                  >
+                    {isLoading ? (
+                      <div className="flex items-center justify-center space-x-2">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        <span>Joining...</span>
+                      </div>
+                    ) : (
+                      'Reserve My Spot'
+                    )}
+                  </button>
+                </div>
+                
+                <p className="text-sm text-slate-400">
+                  No spam. Unsubscribe anytime. Early access guaranteed.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <CheckCircle className="h-16 w-16 text-green-400 mx-auto" />
+                <h3 className="text-2xl font-semibold text-white">You're In!</h3>
+                <p className="text-slate-300">
+                  Thanks for joining the waitlist. We'll notify you as soon as we launch.
+                </p>
+                <button
+                  onClick={() => {
+                    setIsSubmitted(false);
+                    setEmail('');
+                    setError('');
+                    trackEvent('waitlist_reset');
+                  }}
+                  className="text-purple-400 hover:text-purple-300 text-sm underline transition-colors"
+                >
+                  Add another email
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
 
-     {/* Footer */}
-     <footer className="px-6 py-12 bg-slate-900 border-t border-slate-800">
-       <div className="max-w-6xl mx-auto text-center">
-         <div className="text-2xl font-bold text-white mb-4">XORJ</div>
-         <p className="text-slate-400 mb-8">
-           Intelligent Solana investing made simple and secure.
-         </p>
-         
-         <div className="flex justify-center space-x-8 text-slate-400">
-           <a href="#" className="hover:text-white transition-colors">Privacy</a>
-           <a href="#" className="hover:text-white transition-colors">Terms</a>
-           <a href="#" className="hover:text-white transition-colors">Contact</a>
-         </div>
-       </div>
-     </footer>
-   </div>
- );
+      {/* Footer */}
+      <footer className="px-6 py-12 bg-slate-900 border-t border-slate-800">
+        <div className="max-w-6xl mx-auto text-center">
+          <div className="text-2xl font-bold text-white mb-4">XORJ</div>
+          <p className="text-slate-400 mb-8">
+            Intelligent Solana investing made simple and secure.
+          </p>
+          
+          <div className="flex justify-center space-x-8 text-slate-400">
+            <a href="#" className="hover:text-white transition-colors">Privacy</a>
+            <a href="#" className="hover:text-white transition-colors">Terms</a>
+            <a href="#" className="hover:text-white transition-colors">Contact</a>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
 };
 
 export default XORJLandingPage;
