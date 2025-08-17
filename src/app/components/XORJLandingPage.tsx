@@ -314,6 +314,10 @@ const XORJLandingPage = () => {
     const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://yywoynugnrkvpunnvvla.supabase.co';
     const SERVICE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_vOrBqwqUab_Bk6xq4w4aUw_VkyIFlr9';
     
+    if (!SUPABASE_URL || SUPABASE_URL.startsWith('sb_')) {
+      throw new Error('Invalid Supabase URL configuration');
+    }
+    
     console.log('Debug - SUPABASE_URL:', SUPABASE_URL);
     console.log('Debug - SERVICE_KEY:', SERVICE_KEY ? 'Present' : 'Missing');
     
