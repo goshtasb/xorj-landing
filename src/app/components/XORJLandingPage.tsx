@@ -1,7 +1,13 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useSimpleWallet } from '@/contexts/SimpleWalletContext';
 import { Shield, Zap, TrendingUp, Lock, CheckCircle, ArrowRight, AlertCircle } from 'lucide-react';
+import SimpleWalletButton from '@/components/SimpleWalletButton';
+import { WalletStatus } from '@/components/WalletStatus';
+import OnboardingTutorial from '@/components/OnboardingTutorial';
+import VaultManager from '@/components/VaultManager';
+import WalletDebug from '@/components/WalletDebug';
 
 const XORJLandingPage = () => {
   const [email, setEmail] = useState('');
@@ -14,6 +20,9 @@ const XORJLandingPage = () => {
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
   const [selectedTimeframe, setSelectedTimeframe] = useState('30d');
   const [timeframeChange, setTimeframeChange] = useState<number | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showWalletStatus, setShowWalletStatus] = useState(false);
+  const { connected, publicKey } = useSimpleWallet();
 
   const timeframes = [
     { key: '24h', label: '24H', days: '1', interval: 'hourly' },
@@ -394,14 +403,35 @@ const XORJLandingPage = () => {
           <div className="text-2xl font-bold text-white">
             XORJ
           </div>
-          <button className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg transition-colors" onClick={() => {
-            trackEvent('nav_cta_click');
-            document.getElementById('waitlist-form')?.scrollIntoView({ behavior: 'smooth' });
-          }}>
-            Join Waitlist
-          </button>
+          <div className="flex items-center space-x-4">
+            <SimpleWalletButton className="hidden md:block" />
+            <button className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg transition-colors" onClick={() => {
+              trackEvent('nav_cta_click');
+              document.getElementById('waitlist-form')?.scrollIntoView({ behavior: 'smooth' });
+            }}>
+              Join Waitlist
+            </button>
+          </div>
         </div>
       </nav>
+
+      {/* Wallet Info Button - Only show when connected */}
+      {connected && publicKey && (
+        <div className="px-6">
+          <div className="max-w-7xl mx-auto">
+            <button
+              onClick={() => setShowWalletStatus(true)}
+              className="mb-4 flex items-center space-x-2 px-4 py-2 bg-slate-800/50 border border-slate-700 rounded-lg text-white hover:bg-slate-700/50 transition-colors"
+            >
+              <CheckCircle className="h-4 w-4 text-green-400" />
+              <span className="text-sm">Wallet Connected - Click to view details</span>
+              <span className="text-xs text-slate-400 font-mono">
+                {publicKey.toString().slice(0, 4)}...{publicKey.toString().slice(-4)}
+              </span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Hero Section */}
       <section className="relative px-6 py-20 text-center">
@@ -693,6 +723,82 @@ const XORJLandingPage = () => {
         </div>
       </section>
 
+      {/* Vault Management Section */}
+      <section className="px-6 py-20 bg-slate-800/30" data-vault-section>
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-4xl md:text-5xl font-bold text-white mb-6">
+              Your Personal Trading Vault
+            </h2>
+            <p className="text-xl text-slate-300 max-w-3xl mx-auto">
+              Create and manage your AI-powered Solana vault. Deposit USDC, authorize automated trading, 
+              and track your portfolio performance in real-time.
+            </p>
+          </div>
+
+          <div className="grid lg:grid-cols-2 gap-8 items-start">
+            {/* Vault Manager */}
+            <div>
+              <VaultManager />
+            </div>
+
+            {/* Getting Started Guide */}
+            <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
+              <h3 className="text-2xl font-semibold text-white mb-4">Getting Started</h3>
+              
+              <div className="space-y-4">
+                <div className="flex items-start space-x-4">
+                  <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center flex-shrink-0 text-white text-sm font-bold">
+                    1
+                  </div>
+                  <div>
+                    <h4 className="text-white font-medium">Connect Your Wallet</h4>
+                    <p className="text-sm text-slate-400">Connect your Phantom wallet to get started</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start space-x-4">
+                  <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center flex-shrink-0 text-white text-sm font-bold">
+                    2
+                  </div>
+                  <div>
+                    <h4 className="text-white font-medium">Create Your Vault</h4>
+                    <p className="text-sm text-slate-400">Initialize your personal trading vault on Solana</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start space-x-4">
+                  <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center flex-shrink-0 text-white text-sm font-bold">
+                    3
+                  </div>
+                  <div>
+                    <h4 className="text-white font-medium">Fund Your Vault</h4>
+                    <p className="text-sm text-slate-400">Deposit USDC to start automated trading</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start space-x-4">
+                  <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center flex-shrink-0 text-white text-sm font-bold">
+                    4
+                  </div>
+                  <div>
+                    <h4 className="text-white font-medium">Authorize AI Trading</h4>
+                    <p className="text-sm text-slate-400">Grant permissions for automated trading</p>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowOnboarding(true)}
+                className="w-full mt-6 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-all transform hover:scale-105"
+              >
+                Start Guided Setup
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Call to Action Section */}
       <section className="px-6 py-20">
         <div className="max-w-4xl mx-auto text-center">
@@ -792,6 +898,29 @@ const XORJLandingPage = () => {
           </div>
         </div>
       </footer>
+
+      {/* Onboarding Tutorial Modal */}
+      <OnboardingTutorial
+        isOpen={showOnboarding}
+        onClose={() => setShowOnboarding(false)}
+        onComplete={() => {
+          setShowOnboarding(false);
+          // Auto-scroll to vault section after onboarding
+          document.querySelector('[data-vault-section]')?.scrollIntoView({ behavior: 'smooth' });
+        }}
+      />
+      
+      {/* Debug Component */}
+      {/* Wallet Status Modal */}
+      {showWalletStatus && (
+        <WalletStatus
+          modal={true}
+          detailed={true}
+          onClose={() => setShowWalletStatus(false)}
+        />
+      )}
+
+      <WalletDebug />
     </div>
   );
 };
