@@ -1,0 +1,266 @@
+{
+  "Version": "2012-10-17",
+  "PolicyDocument": {
+    "SR-5": "Principle of Least Privilege - Minimal IAM permissions for XORJ Quantitative Engine",
+    "Policies": {
+      
+      "XORJQuantEngineExecutionRole": {
+        "Description": "Minimal execution role for the quantitative engine container",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "SecretManagerReadOnly",
+              "Effect": "Allow",
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret"
+              ],
+              "Resource": [
+                "arn:aws:secretsmanager:*:*:secret:xorj/database-*",
+                "arn:aws:secretsmanager:*:*:secret:xorj/redis-*",
+                "arn:aws:secretsmanager:*:*:secret:xorj/api-keys-*",
+                "arn:aws:secretsmanager:*:*:secret:xorj/internal-*"
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "aws:RequestedRegion": ["us-east-1", "us-west-2"]
+                }
+              }
+            },
+            {
+              "Sid": "AuditLogsWrite",
+              "Effect": "Allow",
+              "Action": [
+                "s3:PutObject",
+                "s3:PutObjectAcl"
+              ],
+              "Resource": [
+                "arn:aws:s3:::xorj-audit-logs-production/audit/*",
+                "arn:aws:s3:::xorj-audit-logs-staging/audit/*"
+              ],
+              "Condition": {
+                "StringEquals": {
+                  "s3:x-amz-server-side-encryption": "AES256"
+                }
+              }
+            },
+            {
+              "Sid": "CloudWatchLogsWrite",
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Resource": [
+                "arn:aws:logs:*:*:log-group:/xorj/quantitative-engine/*"
+              ]
+            }
+          ]
+        }
+      },
+
+      "XORJQuantEngineTaskRole": {
+        "Description": "ECS Task role with minimal permissions",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "AssumeExecutionRole",
+              "Effect": "Allow",
+              "Action": "sts:AssumeRole",
+              "Resource": "arn:aws:iam::*:role/XORJQuantEngineExecutionRole"
+            }
+          ]
+        }
+      },
+
+      "XORJAuditLogsBucketPolicy": {
+        "Description": "S3 bucket policy for immutable audit logs",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "DenyInsecureConnections",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                "arn:aws:s3:::xorj-audit-logs-*",
+                "arn:aws:s3:::xorj-audit-logs-*/*"
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            },
+            {
+              "Sid": "AllowQuantEngineWrite",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": "arn:aws:iam::*:role/XORJQuantEngineExecutionRole"
+              },
+              "Action": [
+                "s3:PutObject",
+                "s3:PutObjectAcl"
+              ],
+              "Resource": "arn:aws:s3:::xorj-audit-logs-*/*",
+              "Condition": {
+                "StringEquals": {
+                  "s3:x-amz-server-side-encryption": "AES256"
+                }
+              }
+            },
+            {
+              "Sid": "DenyObjectDeletion",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": [
+                "s3:DeleteObject",
+                "s3:DeleteObjectVersion"
+              ],
+              "Resource": "arn:aws:s3:::xorj-audit-logs-*/*"
+            }
+          ]
+        }
+      },
+
+      "XORJSecretsManagerPolicy": {
+        "Description": "Secrets Manager policy with restricted access",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "DenySecretsCreationDeletion",
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "arn:aws:iam::*:role/XORJQuantEngineExecutionRole"
+              },
+              "Action": [
+                "secretsmanager:CreateSecret",
+                "secretsmanager:DeleteSecret",
+                "secretsmanager:UpdateSecret",
+                "secretsmanager:PutSecretValue"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Sid": "AllowOnlyXORJSecrets",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": "arn:aws:iam::*:role/XORJQuantEngineExecutionRole"
+              },
+              "Action": [
+                "secretsmanager:GetSecretValue"
+              ],
+              "Resource": "arn:aws:secretsmanager:*:*:secret:xorj/*",
+              "Condition": {
+                "DateGreaterThan": {
+                  "aws:CurrentTime": "2024-01-01T00:00:00Z"
+                },
+                "IpAddress": {
+                  "aws:SourceIp": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"]
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+
+    "AssumeRolePolicyDocuments": {
+      "XORJQuantEngineExecutionRoleAssume": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": ["ecs-tasks.amazonaws.com", "ec2.amazonaws.com"]
+            },
+            "Action": "sts:AssumeRole",
+            "Condition": {
+              "StringEquals": {
+                "aws:RequestedRegion": ["us-east-1", "us-west-2"]
+              }
+            }
+          }
+        ]
+      }
+    },
+
+    "ResourceBasedPolicies": {
+      "VPCSecurityGroups": {
+        "XORJQuantEngineSecurityGroup": {
+          "Description": "Security group for XORJ Quantitative Engine (SR-1: Zero Trust)",
+          "VpcId": "${VPC_ID}",
+          "SecurityGroupRules": [
+            {
+              "Type": "Ingress",
+              "IpProtocol": "tcp",
+              "FromPort": 443,
+              "ToPort": 443,
+              "CidrIp": "10.0.0.0/8",
+              "Description": "HTTPS from VPC only"
+            },
+            {
+              "Type": "Ingress", 
+              "IpProtocol": "tcp",
+              "FromPort": 8000,
+              "ToPort": 8000,
+              "SourceSecurityGroupId": "${LOAD_BALANCER_SG}",
+              "Description": "Internal API from load balancer only"
+            },
+            {
+              "Type": "Egress",
+              "IpProtocol": "tcp",
+              "FromPort": 443,
+              "ToPort": 443,
+              "CidrIp": "0.0.0.0/0",
+              "Description": "HTTPS outbound for API calls"
+            },
+            {
+              "Type": "Egress",
+              "IpProtocol": "tcp", 
+              "FromPort": 5432,
+              "ToPort": 5432,
+              "SourceSecurityGroupId": "${DATABASE_SG}",
+              "Description": "PostgreSQL to database"
+            },
+            {
+              "Type": "Egress",
+              "IpProtocol": "tcp",
+              "FromPort": 6379,
+              "ToPort": 6379,
+              "SourceSecurityGroupId": "${REDIS_SG}",
+              "Description": "Redis to cache"
+            }
+          ]
+        }
+      }
+    },
+
+    "MinimalPermissionsSummary": {
+      "SecretsManager": {
+        "Allowed": ["GetSecretValue", "DescribeSecret"],
+        "Denied": ["CreateSecret", "DeleteSecret", "UpdateSecret"],
+        "Resources": "Only xorj/* secrets"
+      },
+      "S3": {
+        "Allowed": ["PutObject", "PutObjectAcl"],
+        "Denied": ["DeleteObject", "GetObject", "ListBucket"],
+        "Resources": "Only audit logs bucket",
+        "Conditions": "Encryption required"
+      },
+      "CloudWatch": {
+        "Allowed": ["CreateLogGroup", "CreateLogStream", "PutLogEvents"],
+        "Resources": "Only /xorj/quantitative-engine/* log groups"
+      },
+      "Network": {
+        "Ingress": "VPC private subnets only",
+        "Egress": "HTTPS + Database + Redis only"
+      }
+    }
+  }
+}

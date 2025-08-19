@@ -1,13 +1,15 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useSimpleWallet } from '@/contexts/SimpleWalletContext';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { useEnhancedWallet } from '@/contexts/EnhancedWalletContext';
 import { Shield, Zap, TrendingUp, Lock, CheckCircle, ArrowRight, AlertCircle } from 'lucide-react';
-import SimpleWalletButton from '@/components/SimpleWalletButton';
+import EnhancedWalletButton from '@/components/EnhancedWalletButton';
 import { WalletStatus } from '@/components/WalletStatus';
 import OnboardingTutorial from '@/components/OnboardingTutorial';
 import VaultManager from '@/components/VaultManager';
 import WalletDebug from '@/components/WalletDebug';
+import Link from 'next/link';
 
 const XORJLandingPage = () => {
   const [email, setEmail] = useState('');
@@ -22,7 +24,8 @@ const XORJLandingPage = () => {
   const [timeframeChange, setTimeframeChange] = useState<number | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showWalletStatus, setShowWalletStatus] = useState(false);
-  const { connected, publicKey } = useSimpleWallet();
+  const { connected, publicKey } = useWallet();
+  const enhancedWallet = useEnhancedWallet();
 
   const timeframes = [
     { key: '24h', label: '24H', days: '1', interval: 'hourly' },
@@ -404,7 +407,7 @@ const XORJLandingPage = () => {
             XORJ
           </div>
           <div className="flex items-center space-x-4">
-            <SimpleWalletButton className="hidden md:block" />
+            <EnhancedWalletButton className="hidden md:block" />
             <button className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg transition-colors" onClick={() => {
               trackEvent('nav_cta_click');
               document.getElementById('waitlist-form')?.scrollIntoView({ behavior: 'smooth' });

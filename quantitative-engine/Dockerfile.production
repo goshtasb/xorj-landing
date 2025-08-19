@@ -1,0 +1,92 @@
+# XORJ Quantitative Engine - Production Security Hardened Container
+# Multi-stage build for security and minimal attack surface
+
+# Stage 1: Build stage with full toolchain
+FROM python:3.12-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create build directory
+WORKDIR /build
+
+# Copy requirements first for better layer caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir gunicorn
+
+# Stage 2: Production runtime with minimal surface area
+FROM python:3.12-slim
+
+# SR-1/SR-5: Create non-root user with minimal privileges
+RUN groupadd -r xorj && useradd --no-log-init -r -g xorj -u 1001 xorj
+
+# Install only runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /var/cache/apt/*
+
+# Copy Python packages from builder
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Set up application directory
+WORKDIR /app
+
+# Copy application code
+COPY --chown=xorj:xorj app/ ./app/
+COPY --chown=xorj:xorj requirements.txt .
+
+# SR-3: Create logs directory for immutable logging
+RUN mkdir -p /app/logs && \
+    chown xorj:xorj /app/logs && \
+    chmod 755 /app/logs
+
+# SR-3: Create audit log directory
+RUN mkdir -p /app/audit && \
+    chown xorj:xorj /app/audit && \
+    chmod 755 /app/audit
+
+# Create temp directory for application
+RUN mkdir -p /app/tmp && \
+    chown xorj:xorj /app/tmp && \
+    chmod 755 /app/tmp
+
+# SR-5: Remove unnecessary packages and files
+RUN apt-get autoremove -y && \
+    apt-get autoclean && \
+    rm -rf /var/lib/apt/lists/* \
+    /tmp/* \
+    /var/tmp/* \
+    /root/.cache
+
+# SR-1: Security hardening - remove setuid/setgid bits
+RUN find /usr -type f \( -perm +6000 -o -perm +2000 \) -delete 2>/dev/null || true
+
+# SR-5: Switch to non-root user
+USER xorj
+
+# Health check for container orchestration
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+# SR-1: Expose internal port only (not published)
+EXPOSE 8000
+
+# Environment variables for production
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    PATH="/home/xorj/.local/bin:$PATH"
+
+# Production command with Gunicorn
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--worker-class", "uvicorn.workers.UvicornWorker", "--access-logfile", "/app/logs/access.log", "--error-logfile", "/app/logs/error.log", "--log-level", "warning", "app.main:app"]

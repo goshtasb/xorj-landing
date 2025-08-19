@@ -1,9 +1,8 @@
 'use client'
 
-import React from 'react'
-import { useSimpleWallet } from '@/contexts/SimpleWalletContext'
+import React, { useState, useEffect } from 'react'
+import { useWallet } from '@solana/wallet-adapter-react'
 import { CheckCircle, XCircle, Clock, AlertTriangle, Copy, X } from 'lucide-react'
-import { useState } from 'react'
 
 /**
  * Props for WalletStatus component
@@ -43,8 +42,13 @@ interface WalletStatusProps {
  * ```
  */
 export function WalletStatus({ className = '', detailed = false, modal = false, onClose }: WalletStatusProps) {
-  const { publicKey, connected, error } = useSimpleWallet()
+  const { publicKey, connected, wallet } = useWallet()
   const [copied, setCopied] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   /**
    * Copy wallet address to clipboard
@@ -73,11 +77,11 @@ export function WalletStatus({ className = '', detailed = false, modal = false, 
         </div>
       )
     }
-    if (error) {
+    if (connecting) {
       return (
-        <div className="flex items-center text-red-400">
-          <AlertTriangle className="h-4 w-4 mr-1" />
-          <span className="text-sm font-medium">Error</span>
+        <div className="flex items-center text-blue-400">
+          <Clock className="h-4 w-4 mr-1" />
+          <span className="text-sm font-medium">Connecting...</span>
         </div>
       )
     }
@@ -118,7 +122,7 @@ export function WalletStatus({ className = '', detailed = false, modal = false, 
           {/* Wallet Type */}
           <div className="flex items-center justify-between text-sm">
             <span className="text-slate-400">Wallet:</span>
-            <span className="text-white">Phantom</span>
+            <span className="text-white">{mounted ? (wallet?.adapter?.name || 'Unknown') : 'Loading...'}</span>
           </div>
 
           {/* Public Key */}
@@ -149,12 +153,6 @@ export function WalletStatus({ className = '', detailed = false, modal = false, 
         </div>
       )}
 
-      {/* Error State */}
-      {error && (
-        <div className="bg-red-500/10 border border-red-500/20 rounded p-3">
-          <p className="text-red-400 text-sm">{error}</p>
-        </div>
-      )}
 
       {/* Disconnected State Message */}
       {!connected && (detailed || modal) && (
@@ -191,19 +189,17 @@ export function WalletStatus({ className = '', detailed = false, modal = false, 
  * A minimal status indicator for use in headers or compact spaces
  */
 export function CompactWalletStatus({ className = '' }: { className?: string }) {
-  const { connected, connecting, error } = useSimpleWallet()
+  const { connected, connecting, wallet } = useWallet()
   
   const getStatusColor = () => {
     if (connected) return 'bg-green-400'
     if (connecting) return 'bg-blue-400 animate-pulse'
-    if (error) return 'bg-red-400'
     return 'bg-gray-400'
   }
 
   const getStatusText = () => {
     if (connected) return 'connected'
     if (connecting) return 'connecting'
-    if (error) return 'error'
     return 'disconnected'
   }
 

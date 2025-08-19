@@ -12,7 +12,7 @@ import { PublicKey } from '@solana/web3.js'
  * - Bot authorization status
  * - Transaction states and error handling
  * 
- * This store works alongside the walletStore to provide comprehensive
+ * This store works alongside the SimpleWalletContext to provide comprehensive
  * state management for XORJ vault operations.
  */
 

@@ -2,24 +2,9 @@
 
 import React, { useState, useEffect } from 'react'
 import { PublicKey } from '@solana/web3.js'
-import { Wallet, LogOut, Loader2, AlertCircle, X, RefreshCw } from 'lucide-react'
-
-// Extend window type for Phantom
-declare global {
-  interface Window {
-    phantom?: {
-      solana?: {
-        isPhantom: boolean
-        connect: () => Promise<{ publicKey: PublicKey }>
-        disconnect: () => Promise<void>
-        isConnected: boolean
-        publicKey: PublicKey | null
-        on: (event: string, callback: Function) => void
-        off: (event: string, callback: Function) => void
-      }
-    }
-  }
-}
+import { Wallet, LogOut, Loader2, AlertCircle, X, RefreshCw, Wifi, WifiOff } from 'lucide-react'
+import { useSimpleWallet } from '@/contexts/SimpleWalletContext'
+import type { PhantomProvider } from '@/types/phantom'
 
 interface SimpleWalletButtonProps {
   className?: string
@@ -33,208 +18,53 @@ interface SimpleWalletButtonProps {
  * to Phantom wallet. This should eliminate connection errors.
  */
 export function SimpleWalletButton({ className = '', showFullAddress = false }: SimpleWalletButtonProps) {
-  const [publicKey, setPublicKey] = useState<PublicKey | null>(null)
-  const [connecting, setConnecting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { publicKey, connected, connecting, connect, disconnect, error, clearError, networkStatus, retryConnection } = useSimpleWallet()
   const [showModal, setShowModal] = useState(false)
+  const [isClient, setIsClient] = useState(false)
 
-  // Check for existing connection on mount
+  // Ensure client-side rendering
   useEffect(() => {
-    // Check for manual connection first
-    const manualKey = window.localStorage.getItem('manual_wallet_key')
-    if (manualKey) {
-      try {
-        const publicKey = new PublicKey(manualKey)
-        setPublicKey(publicKey)
-        return
-      } catch (err) {
-        console.log('Invalid manual key, removing from storage')
-        window.localStorage.removeItem('manual_wallet_key')
-      }
-    }
-
-    // Check for phantom connection
-    if (typeof window !== 'undefined' && window.phantom?.solana?.isConnected) {
-      setPublicKey(window.phantom.solana.publicKey)
-    }
-
-    // Listen for account changes
-    const handleAccountChanged = (publicKey: PublicKey | null) => {
-      setPublicKey(publicKey)
-    }
-
-    if (window.phantom?.solana) {
-      window.phantom.solana.on('accountChanged', handleAccountChanged)
-      return () => {
-        window.phantom.solana?.off('accountChanged', handleAccountChanged)
-      }
-    }
+    setIsClient(true)
   }, [])
 
-  const handleConnect = async () => {
-    setError(null)
-    setConnecting(true)
-    setShowModal(false) // Close modal immediately to prevent flashing
+  // Handle connect wallet click
+  const handleConnect = () => {
+    clearError()
+    // For better UX, try direct connection first
+    handleDirectConnect()
+  }
 
+  // Handle direct connect (bypasses modal for better popup handling)
+  const handleDirectConnect = async () => {
+    console.log('🔌 User clicked Connect Wallet - attempting direct connection')
+    clearError()
     try {
-      console.log('=== Phantom Connection Debug ===')
-      console.log('Window available:', typeof window !== 'undefined')
-      console.log('Phantom object:', !!window.phantom)
-      console.log('Phantom.solana:', !!window.phantom?.solana)
-      console.log('isPhantom:', window.phantom?.solana?.isPhantom)
-      console.log('isConnected:', window.phantom?.solana?.isConnected)
-      
-      if (typeof window === 'undefined') {
-        throw new Error('Window not available')
-      }
-
-      if (!window.phantom?.solana) {
-        console.log('Phantom not found, opening download page')
-        window.open('https://phantom.app/', '_blank')
-        throw new Error('Phantom wallet not installed. Please install Phantom wallet first.')
-      }
-
-      if (!window.phantom.solana.isPhantom) {
-        throw new Error('Invalid Phantom wallet detected')
-      }
-
-      // Check if already connected
-      if (window.phantom.solana.isConnected && window.phantom.solana.publicKey) {
-        console.log('Already connected, using existing connection')
-        setPublicKey(window.phantom.solana.publicKey)
-        setError(null)
-        return
-      }
-
-      console.log('Attempting connection with various methods...')
-      
-      // Try different connection approaches with delays
-      let response
-      let lastError
-      
-      const connectionMethods = [
-        { name: 'Method 1: Direct window.solana approach', fn: async () => {
-          // Try using window.solana directly (sometimes works better)
-          if ((window as any).solana && (window as any).solana.isPhantom) {
-            return await (window as any).solana.connect()
-          }
-          throw new Error('Direct solana not available')
-        }},
-        { name: 'Method 2: Standard phantom.solana.connect()', fn: () => window.phantom.solana.connect() },
-        { name: 'Method 3: connect() with onlyIfTrusted: false', fn: () => window.phantom.solana.connect({ onlyIfTrusted: false }) },
-        { name: 'Method 4: Legacy approach with timeout', fn: async () => {
-          return await Promise.race([
-            window.phantom.solana.connect(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
-          ])
-        }},
-        { name: 'Method 5: Force refresh connection', fn: async () => {
-          // Try to disconnect first, then reconnect
-          try {
-            await window.phantom.solana.disconnect()
-          } catch (e) {
-            console.log('Disconnect failed (expected):', e)
-          }
-          await new Promise(resolve => setTimeout(resolve, 300))
-          return window.phantom.solana.connect()
-        }}
-      ]
-      
-      for (const method of connectionMethods) {
-        try {
-          console.log(method.name)
-          response = await method.fn()
-          console.log(`${method.name} succeeded!`)
-          break
-        } catch (err) {
-          console.log(`${method.name} failed:`, err)
-          lastError = err
-          // Add delay between methods
-          await new Promise(resolve => setTimeout(resolve, 300))
-        }
-      }
-      
-      if (!response) {
-        console.log('All connection methods failed')
-        throw lastError
-      }
-      
-      if (!response || !response.publicKey) {
-        throw new Error('No response or public key received from Phantom')
-      }
-      
-      console.log('Connection successful:', response.publicKey.toString())
-      setPublicKey(response.publicKey)
-      setError(null)
-      
-    } catch (err: any) {
-      console.error('=== Connection Error Details ===')
-      console.error('Error object:', err)
-      console.error('Error message:', err.message)
-      console.error('Error code:', err.code)
-      console.error('Error stack:', err.stack)
-      
-      // Handle specific error types
-      let errorMessage = 'Failed to connect wallet'
-      
-      if (err.message?.includes('User rejected') || err.message?.includes('rejected')) {
-        errorMessage = 'Connection cancelled. Please approve the connection when prompted.'
-      } else if (err.message?.includes('not installed')) {
-        errorMessage = 'Phantom wallet not installed. Please install it first.'
-      } else if (err.code === 4001 || err.code === -32602) {
-        errorMessage = 'Connection rejected. Please approve the connection to continue.'
-      } else if (err.code === -32603) {
-        errorMessage = 'Phantom wallet internal error. Please refresh the page and try again, or restart your browser.'
-      } else if (err.message?.includes('Unexpected')) {
-        errorMessage = 'Phantom wallet error. Please refresh the page and try again.'
-      } else if (err.message) {
-        errorMessage = `Connection error: ${err.message}`
-      }
-      
-      setError(errorMessage)
-    } finally {
-      setConnecting(false)
+      await connect()
+      console.log('✅ Direct connection successful')
+    } catch (err) {
+      console.error('❌ Direct connection failed, showing modal for alternative options')
+      // If direct connection fails, show modal with manual options
+      setShowModal(true)
     }
   }
 
-  const handleDisconnect = async () => {
-    try {
-      console.log('SimpleWalletButton: Disconnecting...')
-      
-      // Get the old value before removing
-      const oldValue = window.localStorage.getItem('manual_wallet_key')
-      
-      // Clear manual connection
-      window.localStorage.removeItem('manual_wallet_key')
-      
-      // Trigger storage event to sync with context
-      window.dispatchEvent(new StorageEvent('storage', {
-        key: 'manual_wallet_key',
-        newValue: null,
-        oldValue: oldValue,
-        url: window.location.href
-      }))
-      
-      // Disconnect phantom if connected
-      if (window.phantom?.solana) {
-        await window.phantom.solana.disconnect()
-      }
-      
-      // Clear local state
-      setPublicKey(null)
-      setError(null)
-      
-      // Force a page refresh to ensure complete cleanup
-      setTimeout(() => {
-        console.log('Refreshing page to complete disconnect')
-        window.location.reload()
-      }, 100)
-      
-      console.log('SimpleWalletButton: Disconnected successfully')
-    } catch (err: any) {
-      console.error('Disconnect error:', err)
-    }
+  // Handle connect wallet click (alternative - show modal)
+  const handleConnectWithModal = () => {
+    clearError()
+    setShowModal(true)
   }
+
+  // Handle connect from modal
+  const handleModalConnect = async () => {
+    setShowModal(false)
+    await connect()
+  }
+
+  // Handle disconnect
+  const handleDisconnect = () => {
+    disconnect()
+  }
+
 
   const formatAddress = (address: string, showFull: boolean = false): string => {
     if (showFull) return address
@@ -249,6 +79,30 @@ export function SimpleWalletButton({ className = '', showFullAddress = false }: 
     ${className}
   `
 
+  // Network status indicator
+  const getNetworkIcon = () => {
+    switch (networkStatus) {
+      case 'online': return <Wifi className="h-3 w-3 text-green-400" />
+      case 'offline': return <WifiOff className="h-3 w-3 text-red-400" />
+      case 'checking': return <Loader2 className="animate-spin h-3 w-3 text-yellow-400" />
+      case 'error': return <WifiOff className="h-3 w-3 text-red-400" />
+      default: return null
+    }
+  }
+
+  // Show loading state during hydration
+  if (!isClient) {
+    return (
+      <button
+        disabled
+        className={`${baseButtonClasses} bg-gray-600 text-white cursor-not-allowed`}
+      >
+        <Loader2 className="animate-spin h-4 w-4 mr-2" />
+        Loading...
+      </button>
+    )
+  }
+
   if (connecting) {
     return (
       <button
@@ -261,12 +115,15 @@ export function SimpleWalletButton({ className = '', showFullAddress = false }: 
     )
   }
 
-  if (publicKey) {
+  if (connected && publicKey) {
     return (
       <div className="flex items-center space-x-2">
-        <div className={`${baseButtonClasses} bg-green-600 text-white cursor-default`}>
+        <div className={`${baseButtonClasses} bg-green-600 text-white cursor-default relative`}>
           <Wallet className="h-4 w-4 mr-2" />
           {formatAddress(publicKey.toString(), showFullAddress)}
+          <div className="absolute -top-1 -right-1" title={`Network: ${networkStatus}`}>
+            {getNetworkIcon()}
+          </div>
         </div>
         <button
           onClick={handleDisconnect}
@@ -281,19 +138,17 @@ export function SimpleWalletButton({ className = '', showFullAddress = false }: 
 
   if (error) {
     const isRefreshError = error.includes('refresh') || error.includes('internal error')
+    const isNetworkError = error.includes('network') || error.includes('timeout')
     
     return (
       <div className="flex flex-col items-center space-y-3">
         <div className="flex space-x-2">
           <button
-            onClick={() => {
-              setError(null)
-              setShowModal(true)
-            }}
+            onClick={() => retryConnection()}
             className={`${baseButtonClasses} bg-red-600 hover:bg-red-700 text-white`}
           >
             <AlertCircle className="h-4 w-4 mr-2" />
-            Try Again
+            Retry Connection
           </button>
           {isRefreshError && (
             <button
@@ -304,45 +159,89 @@ export function SimpleWalletButton({ className = '', showFullAddress = false }: 
               Refresh Page
             </button>
           )}
+          {isNetworkError && (
+            <button
+              onClick={() => setShowModal(true)}
+              className={`${baseButtonClasses} bg-purple-600 hover:bg-purple-700 text-white`}
+            >
+              <Wallet className="h-4 w-4 mr-2" />
+              Manual Connect
+            </button>
+          )}
         </div>
+        
         {error && (
-          <p className="text-xs text-red-400 text-center max-w-xs">
-            {error}
-          </p>
+          <div className="bg-red-900/20 border border-red-600/20 rounded-lg p-3 max-w-sm">
+            <p className="text-xs text-red-300 text-center">
+              {error}
+            </p>
+            <div className="flex items-center justify-center mt-2 space-x-2">
+              <span className="text-xs text-red-400">Network:</span>
+              {getNetworkIcon()}
+              <span className="text-xs text-red-400">{networkStatus}</span>
+            </div>
+          </div>
         )}
+
         {isRefreshError && (
           <div className="bg-yellow-900/20 border border-yellow-600/20 rounded-lg p-3 max-w-sm">
             <h4 className="text-yellow-300 font-medium text-sm mb-2">Troubleshooting Steps:</h4>
             <ul className="text-xs text-yellow-200 space-y-1">
-              <li>1. Click "Refresh Page" above</li>
-              <li>2. If that fails, restart your browser</li>
+              <li>1. Click &apos;Retry Connection&apos; above</li>
+              <li>2. If that fails, click &apos;Refresh Page&apos;</li>
               <li>3. Make sure Phantom extension is updated</li>
               <li>4. Try disabling/re-enabling Phantom extension</li>
             </ul>
           </div>
         )}
-        {showModal && <ConnectionModal onConnect={handleConnect} onClose={() => setShowModal(false)} />}
+
+        {isNetworkError && (
+          <div className="bg-orange-900/20 border border-orange-600/20 rounded-lg p-3 max-w-sm">
+            <h4 className="text-orange-300 font-medium text-sm mb-2">Network Issues:</h4>
+            <ul className="text-xs text-orange-200 space-y-1">
+              <li>1. Check your internet connection</li>
+              <li>2. Try connecting to a VPN</li>
+              <li>3. Use &apos;Manual Connect&apos; as a fallback</li>
+              <li>4. Wait a moment and retry connection</li>
+            </ul>
+          </div>
+        )}
+
+        {showModal && <ConnectionModal onConnect={handleModalConnect} onClose={() => setShowModal(false)} />}
       </div>
     )
   }
 
   return (
     <>
-      <button
-        onClick={() => setShowModal(true)}
-        className={`${baseButtonClasses} bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-lg`}
-      >
-        <Wallet className="h-4 w-4 mr-2" />
-        Connect Wallet
-      </button>
-      {showModal && <ConnectionModal onConnect={handleConnect} onClose={() => setShowModal(false)} />}
+      <div className="flex flex-col items-center space-y-2">
+        <button
+          onClick={handleConnect}
+          className={`${baseButtonClasses} bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white shadow-lg relative`}
+          disabled={networkStatus === 'offline'}
+        >
+          <Wallet className="h-4 w-4 mr-2" />
+          Connect Phantom Wallet
+          <div className="absolute -top-1 -right-1" title={`Network: ${networkStatus}`}>
+            {getNetworkIcon()}
+          </div>
+        </button>
+        <button
+          onClick={handleConnectWithModal}
+          className="text-xs text-slate-400 hover:text-slate-300 underline"
+        >
+          More options
+        </button>
+      </div>
+      {showModal && <ConnectionModal onConnect={handleModalConnect} onClose={() => setShowModal(false)} />}
     </>
   )
 }
 
 // Simple connection modal
 function ConnectionModal({ onConnect, onClose }: { onConnect: () => void, onClose: () => void }) {
-  const isPhantomAvailable = typeof window !== 'undefined' && window.phantom?.solana?.isPhantom
+  const isPhantomAvailable = typeof window !== 'undefined' && 
+    ((window as any).phantom?.solana?.isPhantom || (window as any).solana?.isPhantom)
   const [showManualInput, setShowManualInput] = useState(false)
   const [manualKey, setManualKey] = useState('')
 
@@ -366,6 +265,7 @@ function ConnectionModal({ onConnect, onClose }: { onConnect: () => void, onClos
         }, 100)
       } catch (err) {
         alert('Invalid public key format')
+        return
       }
     }
   }
@@ -385,6 +285,26 @@ function ConnectionModal({ onConnect, onClose }: { onConnect: () => void, onClos
         <div className="p-6 space-y-4">
           {isPhantomAvailable ? (
             <>
+              <div className="text-center mb-4">
+                <p className="text-slate-300 text-sm mb-3">
+                  🔒 <strong>You will be asked to approve this connection</strong>
+                </p>
+                <p className="text-slate-300 text-xs">
+                  When you click "Connect with Phantom" below, your Phantom wallet will open a popup asking for permission to connect to this site. You must click "Connect" in that popup to proceed.
+                </p>
+              </div>
+              
+              <div className="bg-blue-900/20 border border-blue-600/20 rounded-lg p-3 mb-4">
+                <p className="text-blue-300 text-xs mb-2">
+                  ⚡ <strong>Connection Requirements:</strong>
+                </p>
+                <ol className="text-blue-200 text-xs space-y-1">
+                  <li>1. Make sure popups are allowed for this site</li>
+                  <li>2. Phantom wallet must be unlocked</li>
+                  <li>3. Click "Connect" when Phantom popup appears</li>
+                  <li>4. If no popup appears, check popup blocker settings</li>
+                </ol>
+              </div>
               <button
                 onClick={onConnect}
                 className="w-full flex items-center space-x-3 p-4 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors"
@@ -393,8 +313,8 @@ function ConnectionModal({ onConnect, onClose }: { onConnect: () => void, onClos
                   <Wallet className="h-5 w-5 text-white" />
                 </div>
                 <div className="text-left">
-                  <div className="text-white font-medium">Phantom</div>
-                  <div className="text-sm text-slate-400">Ready to connect</div>
+                  <div className="text-white font-medium">Connect with Phantom</div>
+                  <div className="text-sm text-slate-400">Will prompt for your approval</div>
                 </div>
               </button>
               

@@ -1,8 +1,10 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { X, ArrowRight, ArrowLeft, Check, Wallet, Shield, Zap, TrendingUp } from 'lucide-react'
-import { useSimpleWallet } from '@/contexts/SimpleWalletContext'
+import { X, ArrowRight, ArrowLeft, Check, Wallet, Shield, Zap, TrendingUp, Loader2, AlertCircle } from 'lucide-react'
+import { PublicKey } from '@solana/web3.js'
+import { useWallet } from '@solana/wallet-adapter-react'
+import { useWalletModal } from '@solana/wallet-adapter-react-ui'
 
 /**
  * Onboarding Tutorial Component
@@ -42,7 +44,8 @@ interface OnboardingTutorialProps {
 export function OnboardingTutorial({ isOpen, onClose, onComplete }: OnboardingTutorialProps) {
   const [currentStep, setCurrentStep] = useState(0)
   const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set())
-  const { publicKey, connected } = useSimpleWallet()
+  const { publicKey, connected, connecting, connect } = useWallet()
+  const { setVisible } = useWalletModal()
 
   // Reset state when modal opens
   useEffect(() => {
@@ -281,9 +284,52 @@ function WelcomeStep() {
 }
 
 function WalletStep() {
-  const { publicKey, connected } = useSimpleWallet()
-  const isConnected = connected || !!publicKey
-  const [showConnectButton, setShowConnectButton] = useState(false)
+  const { publicKey, connected, connecting, connect } = useWallet()
+  const { setVisible } = useWalletModal()
+  const isConnected = connected && !!publicKey
+  const [error, setError] = useState<string | null>(null)
+  const [showManualInput, setShowManualInput] = useState(false)
+  const [manualKey, setManualKey] = useState('')
+  
+  // Handle connect wallet click
+  const handleConnect = async () => {
+    console.log('🔌 Onboarding: User clicked Connect Wallet button')
+    console.log('🔌 Onboarding: Connected:', connected, 'Connecting:', connecting, 'PublicKey:', publicKey?.toString())
+    console.log('🔌 Onboarding: Connect function available:', typeof connect)
+    
+    setError(null)
+    try {
+      if (!connect) {
+        console.log('🔌 Onboarding: No connect function, opening wallet modal')
+        setVisible(true)
+        return
+      }
+      
+      console.log('🔌 Onboarding: About to call connect()')
+      await connect()
+      console.log('✅ Onboarding: Wallet connection successful')
+    } catch (err) {
+      console.error('❌ Onboarding: Wallet connection failed:', err)
+      const errorMessage = err instanceof Error ? err.message : 'Failed to connect wallet'
+      setError(errorMessage)
+    }
+  }
+
+  // Handle manual connection for testing
+  const handleManualConnect = () => {
+    if (manualKey.trim()) {
+      try {
+        const testKey = new PublicKey(manualKey.trim())
+        // For testing, we'll just show it as if connected
+        // This won't actually connect but will show the UI state
+        console.log('✅ Onboarding: Manual wallet key entered for testing:', testKey.toString())
+        alert(`Test key entered: ${testKey.toString().slice(0, 8)}...${testKey.toString().slice(-8)}`)
+      } catch (err) {
+        alert('Invalid public key format')
+        return
+      }
+    }
+  }
   
   return (
     <div className="space-y-6">
@@ -307,25 +353,40 @@ function WalletStep() {
           {/* Connect Button */}
           <div className="text-center">
             <button
-              onClick={() => setShowConnectButton(!showConnectButton)}
-              className="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-lg font-medium transition-all transform hover:scale-105"
+              onClick={handleConnect}
+              disabled={connecting}
+              className="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:from-purple-400 disabled:to-blue-400 text-white rounded-lg font-medium transition-all transform hover:scale-105 disabled:transform-none disabled:cursor-not-allowed"
             >
-              <Wallet className="h-5 w-5 mr-2 inline" />
-              Connect Wallet Now
+              {connecting ? (
+                <>
+                  <Loader2 className="h-5 w-5 mr-2 inline animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <Wallet className="h-5 w-5 mr-2 inline" />
+                  Connect Wallet Now
+                </>
+              )}
             </button>
             <p className="text-xs text-slate-400 mt-2">
               Or click "Skip" to continue exploring without a wallet
             </p>
           </div>
 
-          {showConnectButton && (
-            <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-              <p className="text-slate-300 text-sm mb-3 text-center">
-                Click the "Connect Wallet" button in the top navigation to connect your Phantom wallet.
-              </p>
-              <div className="flex items-center justify-center">
-                <div className="animate-pulse bg-purple-600/20 border border-purple-600/30 rounded px-3 py-1 text-purple-300 text-sm">
-                  → Look for "Connect Wallet" button above ↑
+          {error && (
+            <div className="bg-red-900/20 border border-red-600/20 rounded-lg p-4">
+              <div className="flex items-start space-x-3">
+                <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="text-red-300 font-medium mb-1">Connection Error</h4>
+                  <p className="text-sm text-red-200 mb-2">{error}</p>
+                  <button
+                    onClick={handleConnect}
+                    className="text-sm text-red-300 hover:text-red-200 underline"
+                  >
+                    Try again
+                  </button>
                 </div>
               </div>
             </div>
@@ -345,6 +406,34 @@ function WalletStep() {
               </div>
             </div>
           </div>
+
+          {/* Manual connection for testing */}
+          <div className="border-t border-slate-700 pt-4">
+            <button
+              onClick={() => setShowManualInput(!showManualInput)}
+              className="w-full text-sm text-slate-400 hover:text-slate-300"
+            >
+              {showManualInput ? 'Hide' : 'Show'} manual connection (for testing)
+            </button>
+            
+            {showManualInput && (
+              <div className="mt-3 space-y-2">
+                <input
+                  type="text"
+                  placeholder="Enter your Solana public key for testing..."
+                  value={manualKey}
+                  onChange={(e) => setManualKey(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-white text-sm"
+                />
+                <button
+                  onClick={handleManualConnect}
+                  className="w-full py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded"
+                >
+                  Connect Manually (Testing)
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -354,6 +443,11 @@ function WalletStep() {
             <Check className="h-5 w-5 text-green-400" />
             <span className="text-green-300 font-medium">Wallet Connected Successfully!</span>
           </div>
+          {publicKey && (
+            <div className="mt-2 text-sm text-green-200">
+              Address: {publicKey.toString().slice(0, 8)}...{publicKey.toString().slice(-8)}
+            </div>
+          )}
         </div>
       )}
     </div>

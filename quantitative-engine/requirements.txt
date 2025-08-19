@@ -1,0 +1,59 @@
+# XORJ Quantitative Engine Dependencies
+# Python 3.12+ required
+
+# Core Framework
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Data Processing
+pandas==2.1.4
+numpy==1.25.2
+pytz==2023.3
+
+# Database
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+alembic==1.13.1
+
+# HTTP Client & API
+httpx==0.25.2
+aiohttp==3.9.1
+requests==2.31.0
+
+# Solana Integration
+solana==0.32.0
+solders==0.20.0
+base58==2.1.1
+
+# Task Scheduling
+celery==5.3.4
+redis==5.0.1
+APScheduler==3.10.4
+
+# Validation & Schema
+jsonschema==4.20.0
+marshmallow==3.20.2
+
+# Logging & Monitoring
+structlog==23.2.0
+prometheus-client==0.19.0
+
+# Security
+cryptography==41.0.8
+python-jose==3.3.0
+
+# Development & Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-mock==3.12.0
+black==23.11.0
+flake8==6.1.0
+mypy==1.7.1
+
+# Environment Management
+python-dotenv==1.0.0
+
+# Docker Support
+gunicorn==21.2.0
