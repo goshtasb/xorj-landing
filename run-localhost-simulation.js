@@ -20,7 +20,7 @@ const localhostConfig = {
     quantitativeEngine: 'http://localhost:8011',
     tradeExecutionBot: 'http://localhost:8012',
     nextJsApi: 'http://localhost:3002/api',
-    database: 'postgresql://xorj_localhost_user:localhost_password_2024@localhost:5434/xorj_localhost',
+    database: process.env.DATABASE_URL || 'postgresql://xorj_localhost_user:localhost_password_2024@localhost:5434/xorj_localhost',
     redis: 'redis://localhost:6381'
   },
   

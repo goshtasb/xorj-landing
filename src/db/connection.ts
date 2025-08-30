@@ -34,7 +34,7 @@ const connectionConfig = {
   database: process.env.DATABASE_NAME || 'xorj_bot_state',
   
   // Connection pool settings
-  max: parseInt(process.env.DATABASE_POOL_SIZE || '10', 10), // Maximum connections
+  max: parseInt(process.env.DATABASE_POOL_SIZE || '30', 10), // Maximum connections
   min: parseInt(process.env.DATABASE_POOL_MIN || '2', 10),   // Minimum connections
   idleTimeoutMillis: parseInt(process.env.DATABASE_IDLE_TIMEOUT || '30000', 10),
   connectionTimeoutMillis: parseInt(process.env.DATABASE_CONNECT_TIMEOUT || '10000', 10),

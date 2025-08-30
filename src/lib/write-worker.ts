@@ -18,7 +18,7 @@
 import { Worker, Job } from 'bullmq';
 import { WriteJob, BotStatusJob, UserSettingsJob, TradeExecutionJob } from './queueService';
 import { query, transaction } from './database';
-import { cacheLayer } from './cacheLayer';
+import { cacheLayer } from './cacheLayer';\nimport { redisService } from './redis';
 
 interface WorkerConfig {
   concurrency: number;

@@ -45,7 +45,26 @@ The XORJ backend system has undergone comprehensive testing including end-to-end
 
 ---
 
-## 📦 Prerequisites
+## 🔒 Security Prerequisites
+
+### **Critical Security Requirements**
+- **JWT_SECRET**: Generate a secure random secret for JWT token signing
+  ```bash
+  # Generate secure JWT secret (Linux/Mac)
+  openssl rand -hex 32
+
+  # Generate secure JWT secret (Windows PowerShell)
+  [System.Web.Security.Membership]::GeneratePassword(64, 0)
+  ```
+- **Database Password**: Use strong password for production database
+- **Environment Variables**: All secrets must be set via environment variables, never hardcoded
+
+### **Security Validation Checklist**
+- [ ] JWT_SECRET environment variable is set
+- [ ] Database password is set and secure
+- [ ] No hardcoded secrets in codebase
+- [ ] AWS Secrets Manager configured (if using AWS)
+- [ ] SSL/TLS certificates configured for production
 
 ### **System Requirements**
 

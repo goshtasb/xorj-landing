@@ -19,7 +19,7 @@
  * @see PRD Section: Bot Reliability Module
  */
 
-import { pgTable, uuid, text, boolean, jsonb, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, boolean, jsonb, timestamp, integer } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { relations } from 'drizzle-orm';
 import { createInsertSchema, createSelectSchema } from 'drizzle-zod';

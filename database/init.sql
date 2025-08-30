@@ -18,7 +18,8 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'xorj_app') THEN
-        CREATE ROLE xorj_app WITH LOGIN PASSWORD 'xorj_secure_password_change_in_production';
+        CREATE ROLE xorj_app WITH LOGIN PASSWORD '${DATABASE_PASSWORD}';
+        -- WARNING: Replace ${DATABASE_PASSWORD} with a secure password before running this script
     END IF;
 END
 $$;

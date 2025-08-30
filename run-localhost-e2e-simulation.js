@@ -25,7 +25,7 @@ const config = {
   nextJsApiUrl: 'http://localhost:3002/api',
   
   // Database connection
-  databaseUrl: 'postgresql://xorj_localhost_user:localhost_password_2024@localhost:5434/xorj_localhost',
+  databaseUrl: process.env.DATABASE_URL || 'postgresql://xorj_localhost_user:localhost_password_2024@localhost:5434/xorj_localhost',
   redisUrl: 'redis://localhost:6381',
   
   // Test user

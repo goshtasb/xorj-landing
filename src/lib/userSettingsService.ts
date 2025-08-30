@@ -15,24 +15,19 @@
 import { eq } from 'drizzle-orm';
 
 // Temporary minimal table definitions to avoid schema compilation issues
-import { pgTable, uuid, text, timestamp, decimal } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, decimal, jsonb } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 
-// Simplified table definitions for user settings
-const users = pgTable('users', {
+// Table definitions matching existing database schema
+const userSettings = pgTable('user_settings', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`).notNull(),
   walletAddress: text('wallet_address').notNull().unique(),
-  createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).default(sql`now()`).notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).default(sql`now()`).notNull()
-});
-
-const userSettings = pgTable('user_settings', {
-  userId: uuid('user_id').primaryKey().references(() => users.id, { onDelete: 'cascade' }),
-  riskProfile: text('risk_profile', { enum: ['CONSERVATIVE', 'BALANCED', 'AGGRESSIVE'] }).notNull().default('BALANCED'),
-  investmentAmount: decimal('investment_amount', { precision: 20, scale: 8 }).notNull().default('1000.00'),
-  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' })
+  riskProfile: text('risk_profile', { enum: ['Conservative', 'Balanced', 'Aggressive'] }).notNull().default('Balanced'),
+  settings: jsonb('settings').notNull().default('{}'),
+  createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).default(sql`now()`),
+  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).default(sql`now()`)
 });
 
 // Database connection - simplified
@@ -48,8 +43,6 @@ const connectionConfig = {
 
 const pool = new Pool(connectionConfig);
 const db = drizzle(pool);
-
-type RiskProfile = 'CONSERVATIVE' | 'BALANCED' | 'AGGRESSIVE';
 
 export interface UserSettingsApiFormat {
   walletAddress: string;
@@ -68,23 +61,11 @@ export class UserSettingsService {
     try {
       console.log(`🔍 UserSettingsService: Fetching settings for ${walletAddress}`);
       
-      // First, find the user by wallet address
-      const user = await db
-        .select()
-        .from(users)
-        .where(eq(users.walletAddress, walletAddress))
-        .limit(1);
-      
-      if (user.length === 0) {
-        console.log(`👤 User not found for wallet: ${walletAddress}`);
-        return null;
-      }
-      
-      // Get user settings
+      // Get user settings directly from user_settings table
       const settings = await db
         .select()
         .from(userSettings)
-        .where(eq(userSettings.userId, user[0].id))
+        .where(eq(userSettings.walletAddress, walletAddress))
         .limit(1);
       
       if (settings.length === 0) {
@@ -95,8 +76,8 @@ export class UserSettingsService {
       const setting = settings[0];
       const result: UserSettingsApiFormat = {
         walletAddress,
-        riskProfile: this.convertRiskProfileToApiFormat(setting.riskProfile),
-        investmentAmount: setting.investmentAmount ? parseFloat(setting.investmentAmount) : undefined,
+        riskProfile: setting.riskProfile as 'Conservative' | 'Balanced' | 'Aggressive',
+        investmentAmount: setting.settings?.investmentAmount || undefined,
         lastUpdated: setting.updatedAt || new Date()
       };
       
@@ -121,48 +102,32 @@ export class UserSettingsService {
       console.log(`💾 UserSettingsService: Saving settings for ${walletAddress}: ${riskProfile}`);
       
       return await db.transaction(async (tx) => {
-        // Find or create user
-        let user = await tx
-          .select()
-          .from(users)
-          .where(eq(users.walletAddress, walletAddress))
-          .limit(1);
-        
-        if (user.length === 0) {
-          console.log(`👤 Creating new user for wallet: ${walletAddress}`);
-          const newUser = await tx
-            .insert(users)
-            .values({
-              walletAddress,
-              createdAt: new Date(),
-              updatedAt: new Date()
-            })
-            .returning();
-          user = newUser;
-        }
-        
-        const userId = user[0].id;
         const now = new Date();
         
-        // Convert risk profile to database format
-        const dbRiskProfile = this.convertRiskProfileToDbFormat(riskProfile);
+        // Prepare settings data
+        const settingsJson = {
+          investmentAmount: investmentAmount || 1000
+        };
         
-        // Upsert user settings
         const settingsData = {
-          userId,
-          riskProfile: dbRiskProfile,
-          investmentAmount: investmentAmount?.toString() || '1000.00',
+          walletAddress,
+          riskProfile,
+          settings: settingsJson,
           updatedAt: now
         };
         
+        // Upsert user settings (insert or update if exists)
         const savedSettings = await tx
           .insert(userSettings)
-          .values(settingsData)
+          .values({
+            ...settingsData,
+            createdAt: now
+          })
           .onConflictDoUpdate({
-            target: userSettings.userId,
+            target: userSettings.walletAddress,
             set: {
               riskProfile: settingsData.riskProfile,
-              investmentAmount: settingsData.investmentAmount,
+              settings: settingsData.settings,
               updatedAt: now
             }
           })
@@ -204,9 +169,8 @@ export class UserSettingsService {
   static async getAllUsersWithSettings(): Promise<string[]> {
     try {
       const usersWithSettings = await db
-        .select({ walletAddress: users.walletAddress })
-        .from(users)
-        .innerJoin(userSettings, eq(users.id, userSettings.userId));
+        .select({ walletAddress: userSettings.walletAddress })
+        .from(userSettings);
       
       return usersWithSettings.map(user => user.walletAddress);
     } catch (error) {
@@ -215,29 +179,6 @@ export class UserSettingsService {
     }
   }
   
-  /**
-   * Convert database risk profile format to API format
-   */
-  private static convertRiskProfileToApiFormat(dbRiskProfile: RiskProfile): 'Conservative' | 'Balanced' | 'Aggressive' {
-    switch (dbRiskProfile) {
-      case 'CONSERVATIVE': return 'Conservative';
-      case 'BALANCED': return 'Balanced';
-      case 'AGGRESSIVE': return 'Aggressive';
-      default: return 'Balanced';
-    }
-  }
-  
-  /**
-   * Convert API risk profile format to database format
-   */
-  private static convertRiskProfileToDbFormat(apiRiskProfile: 'Conservative' | 'Balanced' | 'Aggressive'): RiskProfile {
-    switch (apiRiskProfile) {
-      case 'Conservative': return 'CONSERVATIVE';
-      case 'Balanced': return 'BALANCED';
-      case 'Aggressive': return 'AGGRESSIVE';
-      default: return 'BALANCED';
-    }
-  }
 }
 
 /**

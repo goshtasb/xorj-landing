@@ -8,7 +8,11 @@
 const jwt = require('jsonwebtoken');
 const puppeteer = require('puppeteer');
 
-const JWT_SECRET = 'dev_jwt_secret_2024_CHANGE_FOR_PRODUCTION';
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret_2024_CHANGE_FOR_PRODUCTION';
+
+if (!process.env.JWT_SECRET) {
+  console.warn('⚠️ WARNING: Using default JWT_SECRET for testing. Set JWT_SECRET environment variable for production.');
+}
 const TEST_WALLET = 'DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK';
 
 async function testTradingUI() {

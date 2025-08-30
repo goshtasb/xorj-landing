@@ -21,7 +21,11 @@ export let options = {
 };
 
 const BASE_URL = 'http://localhost:3003';
-const JWT_SECRET = 'dev_jwt_secret_2024_not_for_production';
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret_2024_not_for_production';
+
+if (!process.env.JWT_SECRET) {
+  console.warn('⚠️ WARNING: Using default JWT_SECRET for load testing. Set JWT_SECRET environment variable for production.');
+}
 
 // Generate a valid JWT token for testing
 function generateJWT() {
