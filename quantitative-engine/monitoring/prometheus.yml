@@ -1,0 +1,54 @@
+# NFR-3: Prometheus configuration for XORJ Quantitative Engine monitoring
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alert_rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+scrape_configs:
+  # XORJ Quantitative Engine metrics
+  - job_name: 'xorj-quantitative-engine'
+    static_configs:
+      - targets: ['quantitative-engine:8001']
+    scrape_interval: 15s
+    metrics_path: /metrics
+    scrape_timeout: 10s
+    
+  # Application health endpoint
+  - job_name: 'xorj-health'
+    static_configs:
+      - targets: ['quantitative-engine:8000']
+    scrape_interval: 30s
+    metrics_path: /health/metrics
+    scrape_timeout: 5s
+    
+  # System metrics (if node_exporter is available)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
+    
+  # PostgreSQL metrics (if postgres_exporter is available)
+  - job_name: 'postgres-exporter'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 30s
+    
+  # Redis metrics (if redis_exporter is available)
+  - job_name: 'redis-exporter'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 30s
+    
+  # Self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 30s

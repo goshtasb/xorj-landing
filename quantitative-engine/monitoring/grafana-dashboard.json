@@ -1,0 +1,363 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "XORJ Quantitative Engine - NFR-3 Observability Dashboard",
+    "tags": ["xorj", "quantitative-engine", "observability", "nfr-3"],
+    "style": "dark",
+    "timezone": "browser",
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Service Health Overview",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "xorj_service_health",
+            "legendFormat": "{{service}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "options": {
+                  "0": {"text": "DOWN", "color": "red"},
+                  "1": {"text": "UP", "color": "green"}
+                },
+                "type": "value"
+              }
+            ],
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Wallet Processing Rate",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(xorj_wallets_processed_total[5m])",
+            "legendFormat": "{{status}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {
+              "axisLabel": "Wallets/sec",
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "showPoints": "never",
+              "pointSize": 5
+            }
+          }
+        },
+        "gridPos": {"h": 6, "w": 8, "x": 8, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "API Response Times",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(xorj_api_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "50th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(xorj_api_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "95th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(xorj_api_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "99th percentile"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "custom": {
+              "axisLabel": "Response Time",
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2
+            }
+          }
+        },
+        "gridPos": {"h": 6, "w": 8, "x": 16, "y": 0}
+      },
+      {
+        "id": 4,
+        "title": "Trust Score Distribution",
+        "type": "histogram",
+        "targets": [
+          {
+            "expr": "increase(xorj_trust_score_distribution_bucket[1h])",
+            "legendFormat": "Trust Score Range"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "bucketSize": 10,
+              "bucketOffset": 0
+            }
+          }
+        },
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 6}
+      },
+      {
+        "id": 5,
+        "title": "Error Rate by Type",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(xorj_errors_total[5m])",
+            "legendFormat": "{{error_type}} - {{component}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "custom": {
+              "axisLabel": "Errors/sec",
+              "drawStyle": "line",
+              "lineInterpolation": "linear"
+            }
+          }
+        },
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 6}
+      },
+      {
+        "id": 6,
+        "title": "System Resources",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "xorj_memory_usage_bytes / (1024^3)",
+            "legendFormat": "Memory Usage (GB)"
+          },
+          {
+            "expr": "xorj_cpu_usage_percent",
+            "legendFormat": "CPU Usage (%)"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "axisLabel": "Usage",
+              "drawStyle": "line",
+              "lineInterpolation": "linear"
+            }
+          }
+        },
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 12}
+      },
+      {
+        "id": 7,
+        "title": "Business Metrics",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "xorj_total_volume_usd",
+            "legendFormat": "Total Volume USD"
+          },
+          {
+            "expr": "xorj_total_profit_usd",
+            "legendFormat": "Total Profit USD"
+          },
+          {
+            "expr": "xorj_trades_analyzed_total",
+            "legendFormat": "Trades Analyzed"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "custom": {
+              "displayMode": "basic",
+              "orientation": "horizontal"
+            }
+          }
+        },
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 12}
+      },
+      {
+        "id": 8,
+        "title": "Wallet Processing Duration",
+        "type": "heatmap",
+        "targets": [
+          {
+            "expr": "rate(xorj_wallet_processing_duration_seconds_bucket[5m])",
+            "format": "heatmap",
+            "legendFormat": "{{le}}"
+          }
+        ],
+        "heatmap": {
+          "xAxis": {
+            "show": true
+          },
+          "yAxis": {
+            "show": true,
+            "logBase": 2,
+            "min": "auto",
+            "max": "auto"
+          },
+          "colorMode": "spectrum",
+          "colorScale": "linear",
+          "hideZeroBuckets": false,
+          "highlightCards": true
+        },
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 18}
+      },
+      {
+        "id": 9,
+        "title": "Eligibility Breakdown",
+        "type": "piechart",
+        "targets": [
+          {
+            "expr": "increase(xorj_wallet_eligibility_total[1h])",
+            "legendFormat": "{{status}}"
+          }
+        ],
+        "options": {
+          "pieType": "pie",
+          "tooltip": {
+            "mode": "single"
+          },
+          "legend": {
+            "displayMode": "visible",
+            "placement": "right"
+          },
+          "displayLabels": ["name", "value", "percent"]
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 26}
+      },
+      {
+        "id": 10,
+        "title": "Batch Processing Performance",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "rate(xorj_batch_processing_duration_seconds_sum[5m]) / rate(xorj_batch_processing_duration_seconds_count[5m])",
+            "legendFormat": "Average Batch Duration"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(xorj_batch_processing_duration_seconds_bucket[5m]))",
+            "legendFormat": "95th Percentile"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "custom": {
+              "axisLabel": "Duration",
+              "drawStyle": "line",
+              "lineInterpolation": "linear"
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 26}
+      },
+      {
+        "id": 11,
+        "title": "Recent Alerts",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "ALERTS{alertname=~\"XORJ.*\"}",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "__name__": true,
+                "job": true,
+                "instance": true
+              },
+              "renameByName": {
+                "alertname": "Alert",
+                "severity": "Severity",
+                "alertstate": "State"
+              }
+            }
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "displayMode": "color-background",
+              "filterable": true
+            },
+            "mappings": [
+              {
+                "options": {
+                  "firing": {"color": "red", "text": "FIRING"},
+                  "pending": {"color": "yellow", "text": "PENDING"}
+                },
+                "type": "value"
+              }
+            ]
+          }
+        },
+        "gridPos": {"h": 6, "w": 24, "x": 0, "y": 34}
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "instance",
+          "type": "query",
+          "query": "label_values(xorj_service_health, instance)",
+          "refresh": 1,
+          "includeAll": true,
+          "multi": true
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Alerts",
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "ALERTS{alertname=~\"XORJ.*\", alertstate=\"firing\"}",
+          "step": "60s",
+          "textFormat": "{{alertname}}: {{summary}}",
+          "titleFormat": "Alert",
+          "iconColor": "red"
+        }
+      ]
+    },
+    "links": [
+      {
+        "title": "XORJ Documentation",
+        "url": "/docs",
+        "type": "link"
+      },
+      {
+        "title": "Prometheus",
+        "url": "/prometheus",
+        "type": "link"
+      }
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+/Users/aflatoongoshtasb/xorj-landing/target/debug/deps/spl_associated_token_account_client-65f1125c57561c59.d: /Users/aflatoongoshtasb/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-associated-token-account-client-2.0.0/src/lib.rs /Users/aflatoongoshtasb/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-associated-token-account-client-2.0.0/src/address.rs /Users/aflatoongoshtasb/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-associated-token-account-client-2.0.0/src/instruction.rs
+
+/Users/aflatoongoshtasb/xorj-landing/target/debug/deps/libspl_associated_token_account_client-65f1125c57561c59.rmeta: /Users/aflatoongoshtasb/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-associated-token-account-client-2.0.0/src/lib.rs /Users/aflatoongoshtasb/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-associated-token-account-client-2.0.0/src/address.rs /Users/aflatoongoshtasb/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-associated-token-account-client-2.0.0/src/instruction.rs
+
+/Users/aflatoongoshtasb/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-associated-token-account-client-2.0.0/src/lib.rs:
+/Users/aflatoongoshtasb/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-associated-token-account-client-2.0.0/src/address.rs:
+/Users/aflatoongoshtasb/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spl-associated-token-account-client-2.0.0/src/instruction.rs:

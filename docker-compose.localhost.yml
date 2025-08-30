@@ -1,0 +1,158 @@
+version: '3.8'
+
+services:
+  # Local PostgreSQL Database (Production-like)
+  localhost-database:
+    image: postgres:15-alpine
+    container_name: xorj-localhost-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: xorj_localhost
+      POSTGRES_USER: xorj_localhost_user
+      POSTGRES_PASSWORD: localhost_password_2024
+      POSTGRES_HOST_AUTH_METHOD: md5
+    ports:
+      - "5434:5432"  # Different port to avoid conflicts with dev
+    volumes:
+      - localhost_db_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - xorj-localhost-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xorj_localhost_user -d xorj_localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Session Management  
+  localhost-redis:
+    image: redis:7-alpine
+    container_name: xorj-localhost-redis
+    restart: unless-stopped
+    ports:
+      - "6381:6379"  # Different port to avoid conflicts
+    volumes:
+      - localhost_redis_data:/data
+    networks:
+      - xorj-localhost-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Quantitative Engine (Localhost)
+  localhost-quantitative-engine:
+    build: 
+      context: ./quantitative-engine
+      dockerfile: Dockerfile.staging
+    container_name: xorj-localhost-quant-engine
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=localhost
+      - DATABASE_URL=postgresql://xorj_localhost_user:localhost_password_2024@localhost-database:5432/xorj_localhost
+      - REDIS_URL=redis://localhost-redis:6379
+      - SOLANA_RPC_URL=https://api.devnet.solana.com
+      - HELIUS_RPC_URL=https://devnet.helius-rpc.com
+      - PRICE_API_URL=https://api.coingecko.com
+      - RAYDIUM_PROGRAM_ID=EhYXq3ANp5nAerUpbSgd7VK2RRcxK1zNuSQ755G5Mtc1  # Devnet
+      - LOG_LEVEL=info
+      - PROMETHEUS_ENABLED=true
+    ports:
+      - "8011:8001"  # Different port for localhost
+    depends_on:
+      localhost-database:
+        condition: service_healthy
+      localhost-redis:
+        condition: service_healthy
+    networks:
+      - xorj-localhost-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Trade Execution Bot (Localhost)
+  localhost-trade-bot:
+    build:
+      context: ./trade-execution-bot
+      dockerfile: Dockerfile.staging
+    container_name: xorj-localhost-trade-bot
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=localhost
+      - DATABASE_URL=postgresql://xorj_localhost_user:localhost_password_2024@localhost-database:5432/xorj_localhost
+      - REDIS_URL=redis://localhost-redis:6379
+      - SOLANA_RPC_URL=https://api.devnet.solana.com
+      - HELIUS_RPC_URL=https://devnet.helius-rpc.com
+      - RAYDIUM_PROGRAM_ID=EhYXq3ANp5nAerUpbSgd7VK2RRcxK1zNuSQ755G5Mtc1
+      - JUPITER_API_URL=https://quote-api.jup.ag/v6
+      - VAULT_PROGRAM_ID=5B8QtPsScaQsw392vnGnUaoiRQ8gy5LzzKdNeXe4qghR
+      - LOG_LEVEL=info
+      - MAX_SLIPPAGE=50  # Reasonable for devnet
+      - QUANTITATIVE_ENGINE_URL=http://localhost-quantitative-engine:8001
+    ports:
+      - "8012:8002"  # Different port for localhost
+    depends_on:
+      localhost-database:
+        condition: service_healthy
+      localhost-redis:
+        condition: service_healthy
+      localhost-quantitative-engine:
+        condition: service_healthy
+    networks:
+      - xorj-localhost-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # FastAPI Gateway (Localhost)
+  localhost-fastapi-gateway:
+    build:
+      context: ./trade-execution-bot
+      dockerfile: Dockerfile.gateway
+    container_name: xorj-localhost-gateway
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=localhost
+      - DATABASE_URL=postgresql://xorj_localhost_user:localhost_password_2024@localhost-database:5432/xorj_localhost
+      - REDIS_URL=redis://localhost-redis:6379
+      - QUANTITATIVE_ENGINE_URL=http://localhost-quantitative-engine:8001
+      - TRADE_BOT_URL=http://localhost-trade-bot:8002
+      - JWT_SECRET=localhost_jwt_secret_2024_development_only
+      - LOG_LEVEL=info
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:3002
+    ports:
+      - "8010:8000"  # Different port for localhost
+    depends_on:
+      localhost-database:
+        condition: service_healthy
+      localhost-redis:
+        condition: service_healthy
+      localhost-quantitative-engine:
+        condition: service_healthy
+      localhost-trade-bot:
+        condition: service_healthy
+    networks:
+      - xorj-localhost-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  localhost_db_data:
+    driver: local
+  localhost_redis_data:
+    driver: local
+
+networks:
+  xorj-localhost-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16

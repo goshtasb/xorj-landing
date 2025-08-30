@@ -1,0 +1,50 @@
+# XORJ Quantitative Engine - CodeQL Configuration (SR-4)
+# GitHub Advanced Security - Static Analysis Configuration
+
+name: "XORJ Quantitative Engine CodeQL"
+
+# Disable default queries and use custom query suites
+disable-default-queries: false
+
+# Include additional query suites for security
+queries:
+  - uses: security-extended
+  - uses: security-and-quality
+  
+# Paths to include in analysis
+paths:
+  - app/
+  - tests/
+
+# Paths to ignore
+paths-ignore:
+  - "**/*.md"
+  - "**/*.txt"
+  - "**/*.json"
+  - "**/test_data/"
+  - "**/mock_data/"
+  - "logs/"
+  - ".git/"
+  - "node_modules/"
+  - "__pycache__/"
+  - "*.pyc"
+
+# Custom queries for financial/crypto applications
+query-filters:
+  - include:
+      kind:
+        - problem
+        - path-problem
+      tags:
+        - security
+        - cryptography
+        - injection
+        - authentication
+        - authorization
+        - credentials
+        - privacy
+
+# Additional packs for Python security
+packs:
+  - codeql/python-queries
+  - codeql/python-security-queries

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Phantom Connection</title>
+    <style>
+        body { background: #1e293b; color: white; font-family: monospace; padding: 20px; }
+        button { background: #7c3aed; color: white; border: none; padding: 10px 20px; margin: 10px; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #6d28d9; }
+        .log { background: #0f172a; padding: 10px; margin: 10px 0; border-radius: 5px; max-height: 400px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Direct Phantom Connection Test</h1>
+    <p>This tests Phantom connection directly without any frameworks.</p>
+    
+    <button onclick="testPhantom()">🚀 Test Phantom Connection</button>
+    <button onclick="clearLogs()">🧹 Clear Logs</button>
+    
+    <div class="log" id="logs"></div>
+    
+    <script>
+        function addLog(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEl = document.getElementById('logs');
+            logEl.innerHTML += `[${timestamp}] ${message}<br>`;
+            logEl.scrollTop = logEl.scrollHeight;
+            console.log(message);
+        }
+        
+        function clearLogs() {
+            document.getElementById('logs').innerHTML = '';
+        }
+        
+        async function testPhantom() {
+            addLog('🚀 Starting Phantom connection test...');
+            
+            try {
+                // Step 1: Check if Phantom exists
+                addLog('🔍 Checking if window.solana exists...');
+                if (typeof window.solana === 'undefined') {
+                    addLog('❌ window.solana is undefined');
+                    addLog('💡 Please install Phantom wallet extension');
+                    return;
+                }
+                addLog('✅ window.solana exists');
+                
+                // Step 2: Check if it's Phantom
+                addLog('🔍 Checking if it\'s Phantom...');
+                addLog(`window.solana.isPhantom: ${window.solana.isPhantom}`);
+                if (!window.solana.isPhantom) {
+                    addLog('❌ Not Phantom wallet');
+                    return;
+                }
+                addLog('✅ Phantom wallet detected');
+                
+                // Step 3: Check current connection status
+                addLog('🔍 Checking current connection...');
+                addLog(`window.solana.isConnected: ${window.solana.isConnected}`);
+                
+                // Step 4: Disconnect if connected
+                if (window.solana.isConnected) {
+                    addLog('🔄 Disconnecting existing connection...');
+                    try {
+                        await window.solana.disconnect();
+                        addLog('✅ Disconnected successfully');
+                    } catch (disconnectError) {
+                        addLog(`⚠️ Disconnect failed: ${disconnectError.message}`);
+                    }
+                }
+                
+                // Step 5: Attempt connection
+                addLog('🔐 Calling window.solana.connect({ onlyIfTrusted: false })...');
+                addLog('💡 Phantom OAuth modal should appear NOW!');
+                
+                const response = await window.solana.connect({
+                    onlyIfTrusted: false
+                });
+                
+                addLog('📱 Connection response received!');
+                addLog(`Response: ${JSON.stringify(response, null, 2)}`);
+                
+                if (response && response.publicKey) {
+                    addLog('✅ SUCCESS! Connected to Phantom');
+                    addLog(`Public Key: ${response.publicKey.toString()}`);
+                } else {
+                    addLog('❌ No public key in response');
+                }
+                
+            } catch (error) {
+                addLog(`❌ Connection failed: ${error.message}`);
+                addLog(`Error code: ${error.code}`);
+                addLog(`Full error: ${JSON.stringify(error, null, 2)}`);
+            }
+        }
+        
+        // Auto-run basic checks on page load
+        window.addEventListener('load', () => {
+            addLog('🔍 Auto-checking Phantom on page load...');
+            addLog(`window.solana exists: ${typeof window.solana !== 'undefined'}`);
+            addLog(`window.solana.isPhantom: ${window.solana?.isPhantom}`);
+            addLog(`window.solana.isConnected: ${window.solana?.isConnected}`);
+            addLog('👆 Click "Test Phantom Connection" button to test');
+        });
+    </script>
+</body>
+</html>

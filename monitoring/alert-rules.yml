@@ -1,0 +1,67 @@
+# XORJ V1 Critical Security Alert Rules
+# Prometheus alert rules for detecting potential security attacks
+
+groups:
+  - name: xorj_security_alerts
+    rules:
+      - alert: HighValidationFailureRate
+        expr: increase(http_requests_total{status=~"400"}[5m]) > 10
+        for: 1m
+        labels:
+          severity: critical
+          category: security
+        annotations:
+          summary: "High validation failure rate detected"
+          description: "{{ $labels.job }} is receiving {{ $value }} validation failures in the last 5 minutes. This could indicate a potential attack."
+
+      - alert: MalformedRequestSpike
+        expr: increase(validation_errors_total{error_type="malformed_json"}[1m]) > 5
+        for: 30s
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "Spike in malformed JSON requests"
+          description: "{{ $labels.job }} received {{ $value }} malformed JSON requests in the last minute."
+
+      - alert: AuthenticationFailureSpike
+        expr: increase(http_requests_total{status="401"}[5m]) > 20
+        for: 2m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "Authentication failure spike"
+          description: "{{ $labels.job }} has {{ $value }} authentication failures in 5 minutes."
+
+      - alert: TradeExecutionFailureRate
+        expr: rate(trade_execution_errors_total[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: critical
+          category: business
+        annotations:
+          summary: "High trade execution failure rate"
+          description: "Trade execution failure rate is {{ $value }} per second over 5 minutes."
+
+  - name: xorj_system_alerts
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 30s
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "{{ $labels.job }} has been down for more than 30 seconds."
+
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          category: reliability
+        annotations:
+          summary: "High error rate on {{ $labels.job }}"
+          description: "{{ $labels.job }} has error rate of {{ $value }} per second."

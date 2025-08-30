@@ -1,0 +1,178 @@
+# NFR-3: Prometheus Alert Rules for XORJ Quantitative Engine
+groups:
+  - name: xorj_quantitative_engine_alerts
+    rules:
+      # Service Health Alerts
+      - alert: XORJServiceDown
+        expr: xorj_service_health == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "XORJ {{ $labels.service }} service is down"
+          description: "Service {{ $labels.service }} has been down for more than 1 minute."
+      
+      # Processing Performance Alerts
+      - alert: HighWalletProcessingFailureRate
+        expr: rate(xorj_wallets_processed_total{status="failed"}[5m]) / rate(xorj_wallets_processed_total[5m]) > 0.2
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High wallet processing failure rate"
+          description: "Wallet processing failure rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+      
+      - alert: SlowWalletProcessing
+        expr: histogram_quantile(0.95, rate(xorj_wallet_processing_duration_seconds_bucket[5m])) > 30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow wallet processing detected"
+          description: "95th percentile wallet processing time is {{ $value }}s over the last 5 minutes."
+      
+      - alert: VerySlowWalletProcessing
+        expr: histogram_quantile(0.95, rate(xorj_wallet_processing_duration_seconds_bucket[5m])) > 60
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Very slow wallet processing detected"
+          description: "95th percentile wallet processing time is {{ $value }}s over the last 5 minutes."
+      
+      # API Performance Alerts
+      - alert: HighAPILatency
+        expr: histogram_quantile(0.95, rate(xorj_api_request_duration_seconds_bucket[5m])) > 2
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API latency detected"
+          description: "95th percentile API response time is {{ $value }}s over the last 5 minutes."
+      
+      - alert: HighAPIErrorRate
+        expr: rate(xorj_api_requests_total{status_code!~"2.."}[5m]) / rate(xorj_api_requests_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API error rate"
+          description: "API error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+      
+      # Error Rate Alerts
+      - alert: HighCalculationErrorRate
+        expr: rate(xorj_errors_total{error_type="calculation"}[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High calculation error rate"
+          description: "Calculation errors are occurring at {{ $value }} errors/second over the last 5 minutes."
+      
+      - alert: HighNetworkErrorRate
+        expr: rate(xorj_errors_total{error_type="network"}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High network error rate"
+          description: "Network errors are occurring at {{ $value }} errors/second over the last 5 minutes."
+      
+      - alert: ExcessiveTimeouts
+        expr: rate(xorj_errors_total{error_type="timeout"}[5m]) > 0.02
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Excessive timeout errors"
+          description: "Timeout errors are occurring at {{ $value }} errors/second over the last 5 minutes."
+      
+      # Trust Score Alerts
+      - alert: LowTrustScoreEligibilityRate
+        expr: rate(xorj_wallet_eligibility_total{status="eligible"}[10m]) / rate(xorj_wallet_eligibility_total[10m]) < 0.3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low trust score eligibility rate"
+          description: "Only {{ $value | humanizePercentage }} of wallets are eligible for trust scores over the last 10 minutes."
+      
+      # System Resource Alerts
+      - alert: HighMemoryUsage
+        expr: xorj_memory_usage_bytes / (1024^3) > 2  # 2GB
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value | humanize }}GB."
+      
+      - alert: HighCPUUsage
+        expr: xorj_cpu_usage_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value }}% over the last 5 minutes."
+      
+      # Business Metrics Alerts
+      - alert: NoTradingActivity
+        expr: increase(xorj_trades_analyzed_total[1h]) == 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No trading activity detected"
+          description: "No trades have been analyzed in the last hour."
+      
+      - alert: LowTradingVolume
+        expr: xorj_total_volume_usd < 10000  # $10K threshold
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "Low trading volume"
+          description: "Total trading volume is ${{ $value | humanize }}, which is below normal levels."
+
+  - name: xorj_reliability_alerts
+    rules:
+      # NFR-1: Reliability Alerts
+      - alert: RepeatedWalletProcessingFailures
+        expr: increase(xorj_wallets_processed_total{status="failed"}[15m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Repeated wallet processing failures"
+          description: "{{ $value }} wallet processing failures in the last 15 minutes."
+      
+      - alert: BatchProcessingStalled
+        expr: time() - xorj_batch_processing_duration_seconds > 1800  # 30 minutes
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Batch processing appears stalled"
+          description: "No batch processing activity detected for over 30 minutes."
+
+  - name: xorj_security_alerts
+    rules:
+      # Security-related alerts
+      - alert: UnusualAuthenticationFailures
+        expr: increase(xorj_api_requests_total{status_code="401"}[10m]) > 20
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Unusual authentication failures"
+          description: "{{ $value }} authentication failures in the last 10 minutes."
+      
+      - alert: HighErrorRateFromSingleIP
+        expr: rate(xorj_api_requests_total{status_code!~"2.."}[5m]) by (client_ip) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate from single IP"
+          description: "IP {{ $labels.client_ip }} is generating {{ $value }} errors/second."
