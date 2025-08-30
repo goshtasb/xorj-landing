@@ -5,7 +5,7 @@ import { useWallet } from '@solana/wallet-adapter-react'
 import { WalletName } from '@solana/wallet-adapter-base'
 
 export const PhantomConnectButton: FC = () => {
-  const { select, connect, connecting, connected, wallet } = useWallet()
+  const { select, connect, connecting, connected } = useWallet()
 
   const handleConnect = useCallback(async () => {
     try {

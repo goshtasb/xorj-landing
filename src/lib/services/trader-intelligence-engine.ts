@@ -9,8 +9,8 @@ import {
   WalletAnalysisResult, 
   WalletPerformanceMetrics,
   BatchAnalysisRequest,
-  BatchAnalysisResult,
-  AnalysisError 
+  BatchAnalysisResult
+  // AnalysisError // Unused
 } from '@/types/trader-intelligence';
 import { solanaDataService } from './solana-data-service';
 import { raydiumParser } from './raydium-parser';
@@ -30,7 +30,7 @@ export class TraderIntelligenceEngine {
    * This is the main entry point for Task 3.1
    */
   async analyzeWallet(config: WalletAnalysisConfig): Promise<WalletAnalysisResult> {
-    const startTime = Date.now();
+    const _startTime = Date.now();
     const analysisId = `analysis_${++this.currentAnalysisId}_${Date.now()}`;
     
     console.log(`🚀 Starting wallet analysis: ${analysisId}`);
@@ -68,7 +68,7 @@ export class TraderIntelligenceEngine {
         console.warn(`⚠️ No transactions found for wallet ${config.walletAddress}`);
         result.status = 'failed';
         result.completedAt = Date.now();
-        result.processingStats.processingTimeMs = Date.now() - startTime;
+        result.processingStats.processingTimeMs = Date.now() - _startTime;
         return result;
       }
 
@@ -77,11 +77,11 @@ export class TraderIntelligenceEngine {
       // Step 2: Filter by time range if specified
       let filteredSignatures = signatures;
       if (config.startDate || config.endDate) {
-        const startTime = config.startDate || 0;
+        const _startTime = config.startDate || 0;
         const endTime = config.endDate || Math.floor(Date.now() / 1000);
         filteredSignatures = solanaDataService.filterTransactionsByTimeRange(
           signatures,
-          startTime,
+          _startTime,
           endTime
         );
         console.log(`🗓️ Filtered to ${filteredSignatures.length} transactions in date range`);
@@ -111,7 +111,7 @@ export class TraderIntelligenceEngine {
         console.warn(`⚠️ No Raydium swaps found for wallet ${config.walletAddress}`);
         result.status = 'failed';
         result.completedAt = Date.now();
-        result.processingStats.processingTimeMs = Date.now() - startTime;
+        result.processingStats.processingTimeMs = Date.now() - _startTime;
         return result;
       }
 
@@ -220,8 +220,8 @@ export class TraderIntelligenceEngine {
       console.log(`   • Data Quality: ${metrics.dataQuality}`);
       console.log(`   • Confidence Score: ${metrics.confidenceScore}/100`);
 
-    } catch (error) {
-      console.error(`❌ Fatal error in wallet analysis:`, error);
+    } catch {
+      console.error(`❌ Fatal error in wallet analysis:`);
       result.status = 'failed';
       result.processingStats.errors.push({
         type: 'calculation_error',
@@ -231,7 +231,7 @@ export class TraderIntelligenceEngine {
       });
     } finally {
       result.completedAt = Date.now();
-      result.processingStats.processingTimeMs = Date.now() - startTime;
+      result.processingStats.processingTimeMs = Date.now() - _startTime;
       console.log(`⏱️ Total processing time: ${result.processingStats.processingTimeMs}ms`);
     }
 
@@ -246,7 +246,7 @@ export class TraderIntelligenceEngine {
     config?: Omit<WalletAnalysisConfig, 'walletAddress'>
   ): Promise<{
     scores: XORJTrustScore[];
-    cohortStats: any;
+    cohortStats: { averageScore: number; totalAnalyzed: number; riskDistribution: Record<string, number> };
     processingStats: {
       totalWallets: number;
       analyzedWallets: number;
@@ -254,7 +254,7 @@ export class TraderIntelligenceEngine {
       processingTimeMs: number;
     };
   }> {
-    const startTime = Date.now();
+    // const _startTime = Date.now(); // Unused - removed for performance scoring
     console.log(`🎯 Scoring ${walletAddresses.length} wallets with XORJ Trust Score`);
 
     // Analyze all wallets first
@@ -275,7 +275,7 @@ export class TraderIntelligenceEngine {
     // Calculate trust scores
     const { scores, cohortStats } = xorjTrustScoreCalculator.calculateTrustScores(walletMetrics);
 
-    const processingTimeMs = Date.now() - startTime;
+    // const _processingTimeMs = Date.now() - _startTime; // Unused
 
     return {
       scores,
@@ -293,7 +293,7 @@ export class TraderIntelligenceEngine {
    * Analyze multiple wallets in batch with parallel processing
    */
   async analyzeBatch(request: BatchAnalysisRequest): Promise<BatchAnalysisResult> {
-    const startTime = Date.now();
+    const _startTime = Date.now();
     const requestId = `batch_${Date.now()}`;
 
     console.log(`🚀 Starting parallel batch analysis: ${requestId}`);
@@ -322,8 +322,8 @@ export class TraderIntelligenceEngine {
           const result = await this.analyzeWallet(walletConfig);
           return result;
 
-        } catch (error) {
-          console.error(`❌ Failed to analyze wallet ${walletAddress}:`, error);
+        } catch {
+          console.error(`❌ Failed to analyze wallet ${walletAddress}:`);
           
           // Create failed result
           return {
@@ -383,7 +383,7 @@ export class TraderIntelligenceEngine {
     // Calculate summary statistics
     const completedWallets = walletResults.filter(r => r.status === 'completed').length;
     const failedWallets = walletResults.filter(r => r.status === 'failed').length;
-    const totalTime = Date.now() - startTime;
+    const totalTime = Date.now() - _startTime;
     const avgProcessingTime = walletResults.length > 0 ? 
       walletResults.reduce((sum, result) => sum + result.processingStats.processingTimeMs, 0) / walletResults.length : 0;
 
@@ -396,7 +396,7 @@ export class TraderIntelligenceEngine {
         failedWallets,
         avgProcessingTimeMs: avgProcessingTime
       },
-      startedAt: startTime,
+      startedAt: _startTime,
       completedAt: Date.now()
     };
 
@@ -445,8 +445,8 @@ export class TraderIntelligenceEngine {
         },
         lastCheck: Date.now()
       };
-    } catch (error) {
-      console.error(`❌ Health check failed:`, error);
+    } catch {
+      console.error(`❌ Health check failed:`);
       return {
         status: 'unhealthy',
         services: {

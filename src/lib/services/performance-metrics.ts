@@ -12,8 +12,8 @@ import {
   EnhancedSwap, 
   CompletedTrade, 
   TokenPosition, 
-  WalletPerformanceMetrics,
-  AnalysisError 
+  WalletPerformanceMetrics
+  // AnalysisError // Unused
 } from '@/types/trader-intelligence';
 import { ANALYSIS_CONFIG } from '@/lib/constants';
 
@@ -28,14 +28,15 @@ export class PerformanceMetricsCalculator {
     completedTrades: CompletedTrade[],
     activePositions: TokenPosition[],
     analysisStartDate: number,
-    analysisEndDate: number
+    analysisEndDate: number,
+    userInvestmentAmount?: number // Investment amount as baseline for ROI calculations
   ): WalletPerformanceMetrics {
     console.log(`📊 Calculating performance metrics for wallet: ${walletAddress}`);
     console.log(`📈 Data: ${enhancedSwaps.length} swaps, ${completedTrades.length} trades, ${activePositions.length} positions`);
 
     // Core metrics from PRD
-    const netRoi = this.calculateNetROI(completedTrades, activePositions);
-    const maxDrawdown = this.calculateMaxDrawdown(completedTrades);
+    const netRoi = this.calculateNetROI(completedTrades, activePositions, userInvestmentAmount);
+    const maxDrawdown = this.calculateMaxDrawdown(completedTrades, userInvestmentAmount);
     const sharpeRatio = this.calculateSharpeRatio(completedTrades, analysisStartDate, analysisEndDate);
     const winLossRatio = this.calculateWinLossRatio(completedTrades);
     const totalTrades = completedTrades.length;
@@ -105,8 +106,9 @@ export class PerformanceMetricsCalculator {
 
   /**
    * Calculate Net ROI (%) - PRD Core Metric
+   * Uses user's investment amount as baseline if provided, otherwise falls back to cost basis
    */
-  private calculateNetROI(completedTrades: CompletedTrade[], activePositions: TokenPosition[]): number {
+  private calculateNetROI(completedTrades: CompletedTrade[], activePositions: TokenPosition[], userInvestmentAmount?: number): number {
     if (completedTrades.length === 0 && activePositions.length === 0) return 0;
 
     // Total realized P&L from completed trades
@@ -115,22 +117,30 @@ export class PerformanceMetricsCalculator {
     // Total unrealized P&L from active positions
     const unrealizedPnL = activePositions.reduce((sum, pos) => sum + (pos.unrealizedPnlUsd || 0), 0);
     
-    // Total cost basis
+    const totalPnL = realizedPnL + unrealizedPnL;
+
+    // Use user's investment amount as baseline if provided
+    if (userInvestmentAmount && userInvestmentAmount > 0) {
+      console.log(`📊 Using user investment amount as ROI baseline: $${userInvestmentAmount}`);
+      return (totalPnL / userInvestmentAmount) * 100;
+    }
+
+    // Fallback to cost basis calculation for backward compatibility
     const realizedCostBasis = completedTrades.reduce((sum, trade) => sum + trade.entryValueUsd, 0);
     const unrealizedCostBasis = activePositions.reduce((sum, pos) => sum + pos.totalCostBasisUsd, 0);
-    
-    const totalPnL = realizedPnL + unrealizedPnL;
     const totalCostBasis = realizedCostBasis + unrealizedCostBasis;
 
     if (totalCostBasis === 0) return 0;
 
+    console.log(`📊 Fallback to cost basis for ROI calculation: $${totalCostBasis}`);
     return (totalPnL / totalCostBasis) * 100;
   }
 
   /**
    * Calculate Maximum Drawdown (%) - PRD Core Metric
+   * Uses user's investment amount as baseline if provided for percentage calculation
    */
-  private calculateMaxDrawdown(completedTrades: CompletedTrade[]): number {
+  private calculateMaxDrawdown(completedTrades: CompletedTrade[], userInvestmentAmount?: number): number {
     if (completedTrades.length === 0) return 0;
 
     // Sort trades by exit timestamp
@@ -157,7 +167,13 @@ export class PerformanceMetricsCalculator {
       }
     }
 
-    // Convert to percentage (if we have a positive peak)
+    // Use investment amount as baseline for percentage calculation if provided
+    if (userInvestmentAmount && userInvestmentAmount > 0 && maxDrawdown > 0) {
+      console.log(`📊 Using investment amount for drawdown percentage: $${userInvestmentAmount}`);
+      return (maxDrawdown / userInvestmentAmount) * 100;
+    }
+
+    // Fallback: Convert to percentage using peak (traditional calculation)
     return peak > 0 ? (maxDrawdown / peak) * 100 : 0;
   }
 
@@ -224,9 +240,8 @@ export class PerformanceMetricsCalculator {
    * Calculate daily returns for Sharpe ratio calculation
    */
   private calculateDailyReturns(
-    completedTrades: CompletedTrade[], 
-    startDate: number, 
-    endDate: number
+    completedTrades: CompletedTrade[] 
+    /* _startDate: number, _endDate: number */
   ): number[] {
     // Group trades by day
     const tradesByDay = new Map<string, CompletedTrade[]>();
@@ -243,7 +258,7 @@ export class PerformanceMetricsCalculator {
 
     // Calculate daily P&L and returns
     const dailyReturns: number[] = [];
-    let cumulativeValue = 0;
+    // const cumulativeValue = 0; // Unused
 
     // Sort days chronologically
     const sortedDays = Array.from(tradesByDay.keys()).sort();
@@ -397,9 +412,8 @@ export class PerformanceMetricsCalculator {
    * Calculate time-based performance metrics
    */
   private calculateTimeBasedMetrics(
-    completedTrades: CompletedTrade[], 
-    startDate: number, 
-    endDate: number
+    completedTrades: CompletedTrade[] 
+    /* _startDate: number, _endDate: number */
   ): {
     bestMonth: number;
     worstMonth: number;
@@ -430,8 +444,8 @@ export class PerformanceMetricsCalculator {
     // Calculate consecutive wins/losses
     const sortedTrades = [...completedTrades].sort((a, b) => a.exitTimestamp - b.exitTimestamp);
     
-    let consecutiveWins = 0;
-    let consecutiveLosses = 0;
+    // const consecutiveWins = 0; // Unused
+    // const consecutiveLosses = 0; // Unused
     let currentWinStreak = 0;
     let currentLossStreak = 0;
     let maxWinStreak = 0;
@@ -494,8 +508,8 @@ export class PerformanceMetricsCalculator {
    */
   private calculateConfidenceScore(
     enhancedSwaps: EnhancedSwap[],
-    completedTrades: CompletedTrade[],
-    activePositions: TokenPosition[]
+    completedTrades: CompletedTrade[]
+    /* _activePositions: TokenPosition[] */
   ): number {
     let score = 0;
 

@@ -1,0 +1,301 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database - Core Service 1
+  postgres:
+    image: postgres:15-alpine
+    container_name: xorj-staging-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: xorj_staging
+      POSTGRES_USER: xorj_staging_user
+      POSTGRES_PASSWORD: ${STAGING_DB_PASSWORD}
+      POSTGRES_HOST_AUTH_METHOD: md5
+    ports:
+      - "5433:5432"  # Different port to avoid conflicts
+    volumes:
+      - staging_db_data:/var/lib/postgresql/data
+      - ./database/staging-init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - xorj-staging-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xorj_staging_user -d xorj_staging"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache - Core Service 2
+  redis:
+    image: redis:7-alpine
+    container_name: xorj-staging-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"  # Different port to avoid conflicts
+    volumes:
+      - staging_redis_data:/data
+    networks:
+      - xorj-staging-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Chaos Network Proxy (For API Failure Injection)
+  chaos-proxy:
+    image: shopify/toxiproxy:2.5.0
+    container_name: xorj-chaos-proxy
+    ports:
+      - "8474:8474"  # Toxiproxy API
+      - "8475:8475"  # Helius RPC proxy
+      - "8476:8476"  # Price feed API proxy
+    networks:
+      - xorj-staging-network
+    command: >
+      sh -c "
+        toxiproxy-server &
+        sleep 5 &&
+        toxiproxy-cli create helius_rpc -l 0.0.0.0:8475 -u mainnet.helius-rpc.com:443 &&
+        toxiproxy-cli create price_api -l 0.0.0.0:8476 -u api.coingecko.com:443 &&
+        wait
+      "
+    healthcheck:
+      test: ["CMD", "toxiproxy-cli", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+
+  # Quantitative Engine - Core Service 3
+  quantitative-engine:
+    build: 
+      context: ./quantitative-engine
+      dockerfile: Dockerfile.staging
+    container_name: xorj-staging-quant-engine
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=staging
+      - DATABASE_URL=postgresql://xorj_staging_user:${STAGING_DB_PASSWORD}@postgres:5432/xorj_staging
+      - REDIS_URL=redis://redis:6379
+      - SOLANA_RPC_URL=https://api.testnet.solana.com
+      - HELIUS_RPC_URL=http://chaos-proxy:8475
+      - PRICE_API_URL=http://chaos-proxy:8476
+      - RAYDIUM_PROGRAM_ID=EhYXq3ANp5nAerUpbSgd7VK2RRcxK1zNuSQ755G5Mtc1  # Testnet
+      - LOG_LEVEL=debug
+      - CHAOS_MODE=enabled
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chaos-proxy:
+        condition: service_healthy
+    networks:
+      - xorj-staging-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Trade Execution Bot - Core Service 4
+  trade-execution-bot:
+    build:
+      context: ./trade-execution-bot
+      dockerfile: Dockerfile.staging
+    container_name: xorj-staging-trade-bot
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=staging
+      - DATABASE_URL=postgresql://xorj_staging_user:${STAGING_DB_PASSWORD}@postgres:5432/xorj_staging
+      - REDIS_URL=redis://redis:6379
+      - SOLANA_RPC_URL=https://api.testnet.solana.com
+      - HELIUS_RPC_URL=http://chaos-proxy:8475
+      - RAYDIUM_PROGRAM_ID=EhYXq3ANp5nAerUpbSgd7VK2RRcxK1zNuSQ755G5Mtc1
+      - JUPITER_API_URL=https://quote-api.jup.ag/v6
+      - VAULT_PROGRAM_ID=5B8QtPsScaQsw392vnGnUaoiRQ8gy5LzzKdNeXe4qghR
+      - LOG_LEVEL=debug
+      - CHAOS_MODE=enabled
+      - MAX_SLIPPAGE=100  # Higher for testnet
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      quantitative-engine:
+        condition: service_healthy
+    networks:
+      - xorj-staging-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # FastAPI Gateway (Staging)
+  staging-fastapi-gateway:
+    build:
+      context: ./trade-execution-bot
+      dockerfile: Dockerfile.gateway
+    container_name: xorj-staging-gateway
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=staging
+      - DATABASE_URL=postgresql://xorj_staging_user:${STAGING_DB_PASSWORD}@postgres:5432/xorj_staging
+      - REDIS_URL=redis://redis:6379
+      - QUANTITATIVE_ENGINE_URL=http://quantitative-engine:8001
+      - TRADE_BOT_URL=http://trade-execution-bot:8002
+      - JWT_SECRET=${STAGING_JWT_SECRET}
+      - LOG_LEVEL=debug
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      quantitative-engine:
+        condition: service_healthy
+      trade-execution-bot:
+        condition: service_healthy
+    networks:
+      - xorj-staging-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Next.js Application - Core Service 5
+  nextjs-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.staging
+    container_name: xorj-staging-app
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=staging
+      - DATABASE_URL=postgresql://xorj_staging_user:${STAGING_DB_PASSWORD}@staging-database:5432/xorj_staging
+      - NEXTAUTH_URL=http://localhost:3001
+      - NEXTAUTH_SECRET=${STAGING_NEXTAUTH_SECRET}
+      - FASTAPI_GATEWAY_URL=http://staging-fastapi-gateway:8000
+      - SOLANA_RPC_URL=https://api.testnet.solana.com
+      - HELIUS_RPC_URL=http://chaos-proxy:8475
+      - VAULT_PROGRAM_ID=5B8QtPsScaQsw392vnGnUaoiRQ8gy5LzzKdNeXe4qghR
+    ports:
+      - "3001:3000"  # Different port to avoid conflicts
+    depends_on:
+      staging-database:
+        condition: service_healthy
+      staging-fastapi-gateway:
+        condition: service_healthy
+    networks:
+      - xorj-staging-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/system/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Chaos Testing Controller
+  chaos-controller:
+    build:
+      context: ./chaos-testing
+      dockerfile: Dockerfile
+    container_name: xorj-chaos-controller
+    restart: unless-stopped
+    environment:
+      - STAGING_DB_HOST=staging-database
+      - STAGING_DB_PORT=5432
+      - STAGING_DB_USER=xorj_staging_user
+      - STAGING_DB_PASSWORD=${STAGING_DB_PASSWORD}
+      - STAGING_DB_NAME=xorj_staging
+      - TOXIPROXY_URL=http://chaos-proxy:8474
+      - SOLANA_RPC_URL=https://api.testnet.solana.com
+      - LOG_LEVEL=debug
+    ports:
+      - "9000:9000"
+    depends_on:
+      staging-database:
+        condition: service_healthy
+      chaos-proxy:
+        condition: service_healthy
+    networks:
+      - xorj-staging-network
+    volumes:
+      - ./chaos-testing/results:/app/results
+
+  # Prometheus - Metrics Collection and Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: xorj-staging-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus-staging.yml:/etc/prometheus/prometheus.yml
+      - staging_prometheus_data:/prometheus
+    networks:
+      - xorj-staging-network
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - quantitative-engine
+      - trade-execution-bot
+      - nextjs-app
+
+  # Grafana - Metrics Visualization Dashboard
+  grafana:
+    image: grafana/grafana:latest
+    container_name: xorj-staging-grafana
+    restart: unless-stopped
+    ports:
+      - "3002:3000"  # Different port to avoid conflicts
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-staging_grafana_admin_2024}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - staging_grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - xorj-staging-network
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  staging_db_data:
+    driver: local
+  staging_redis_data:
+    driver: local
+  staging_prometheus_data:
+    driver: local
+  staging_grafana_data:
+    driver: local
+
+networks:
+  xorj-staging-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

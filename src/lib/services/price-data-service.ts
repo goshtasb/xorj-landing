@@ -58,8 +58,8 @@ export class PriceDataService {
             });
           }
         }
-      } catch (error) {
-        console.error(`❌ Error fetching price for ${mint}:`, error);
+      } catch {
+        console.error(`❌ Error fetching price for ${mint}:`);
         errors.push({
           type: 'price_api_error',
           message: `Price fetch error for ${mint}: ${error}`,
@@ -105,8 +105,8 @@ export class PriceDataService {
       }
 
       return priceData;
-    } catch (error) {
-      console.error(`❌ Error fetching historical price for ${mint} at ${timestamp}:`, error);
+    } catch {
+      console.error(`❌ Error fetching historical price for ${mint} at ${timestamp}:`);
       return null;
     }
   }
@@ -148,7 +148,7 @@ export class PriceDataService {
           console.log(`📊 Progress: ${i}/${sortedTimestamps.length} historical prices fetched`);
         }
 
-      } catch (error) {
+      } catch {
         errors.push({
           type: 'price_api_error',
           message: `Historical price fetch error: ${error}`,
@@ -193,8 +193,8 @@ export class PriceDataService {
       }
 
       return null;
-    } catch (error) {
-      console.error(`❌ Jupiter API fetch error for ${mint}:`, error);
+    } catch {
+      console.error(`❌ Jupiter API fetch error for ${mint}:`);
       return null;
     }
   }
@@ -238,8 +238,8 @@ export class PriceDataService {
       }
 
       return null;
-    } catch (error) {
-      console.error(`❌ CoinGecko API fetch error for ${mint}:`, error);
+    } catch {
+      console.error(`❌ CoinGecko API fetch error for ${mint}:`);
       return null;
     }
   }
@@ -256,8 +256,8 @@ export class PriceDataService {
       // This is a placeholder - actual implementation would depend on Jupiter's historical endpoints
       console.log(`🔍 Jupiter historical price not implemented yet for ${mint} at ${timestamp}`);
       return null;
-    } catch (error) {
-      console.error(`❌ Jupiter historical API error:`, error);
+    } catch {
+      console.error(`❌ Jupiter historical API error:`);
       return null;
     }
   }
@@ -307,8 +307,8 @@ export class PriceDataService {
       }
 
       return null;
-    } catch (error) {
-      console.error(`❌ CoinGecko historical API error:`, error);
+    } catch {
+      console.error(`❌ CoinGecko historical API error:`);
       return null;
     }
   }
@@ -454,7 +454,7 @@ export class PriceDataService {
     avgResponseTime: number;
   }> {
     // Simple health check implementation
-    const startTime = Date.now();
+    const _startTime = Date.now();
     
     try {
       // Test Jupiter API
@@ -465,7 +465,7 @@ export class PriceDataService {
       const coingeckoTest = await this.fetchCurrentPriceFromCoinGecko('So11111111111111111111111111111111111111112');
       const coingeckoStatus = coingeckoTest ? 'ok' : 'error';
 
-      const avgResponseTime = Date.now() - startTime;
+      const avgResponseTime = Date.now() - _startTime;
 
       return {
         jupiterStatus,
@@ -473,12 +473,12 @@ export class PriceDataService {
         cacheHitRate: 0, // Would need to track this over time
         avgResponseTime
       };
-    } catch (error) {
+    } catch {
       return {
         jupiterStatus: 'unknown',
         coingeckoStatus: 'unknown',
         cacheHitRate: 0,
-        avgResponseTime: Date.now() - startTime
+        avgResponseTime: Date.now() - _startTime
       };
     }
   }

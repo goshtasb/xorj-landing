@@ -6,7 +6,7 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { MetricCard } from './MetricCard';
 import { PerformanceChart } from './PerformanceChart';
@@ -39,6 +39,8 @@ interface DashboardContainerProps {
 }
 
 export function DashboardContainer({ className = '' }: DashboardContainerProps) {
+  console.log('🎯 DashboardContainer: Component rendering started');
+  
   const { publicKey } = useWallet();
   
   // State management
@@ -59,7 +61,7 @@ export function DashboardContainer({ className = '' }: DashboardContainerProps) 
   const effectivePublicKey = mounted ? publicKey?.toString() : undefined;
 
   // Fetch performance data
-  const fetchPerformanceData = async (timeRange: TimeRange, forceRefresh = false) => {
+  const fetchPerformanceData = useCallback(async (timeRange: TimeRange, forceRefresh = false) => {
     // Only fetch if wallet is actually connected and component is mounted
     if (!mounted || !effectivePublicKey) {
       setPerformanceData(null);
@@ -71,7 +73,7 @@ export function DashboardContainer({ className = '' }: DashboardContainerProps) 
     setError(null);
 
     try {
-      console.log(`📊 Fetching performance data for ${timeRange}`);
+      console.log(`📊 DashboardContainer: Fetching performance data for ${timeRange}, wallet: ${effectivePublicKey}`);
       
       const response = await fetch(
         `/api/user/performance?walletAddress=${effectivePublicKey}&timeRange=${timeRange}`,
@@ -92,7 +94,7 @@ export function DashboardContainer({ className = '' }: DashboardContainerProps) 
 
       setPerformanceData(result.data);
       setLastRefresh(Date.now());
-      console.log('✅ Performance data loaded successfully');
+      console.log('✅ DashboardContainer: Performance data loaded successfully:', result.data);
 
     } catch (err) {
       console.error('❌ Performance data fetch failed:', err);
@@ -100,14 +102,14 @@ export function DashboardContainer({ className = '' }: DashboardContainerProps) 
     } finally {
       setLoading(false);
     }
-  };
+  }, [mounted, effectivePublicKey]);
 
   // Initial data fetch and when time range changes
   useEffect(() => {
     if (mounted) {
       fetchPerformanceData(activeTimeRange);
     }
-  }, [activeTimeRange, mounted, effectivePublicKey]);
+  }, [activeTimeRange, mounted, effectivePublicKey, fetchPerformanceData]);
 
   // Handle time range change
   const handleTimeRangeChange = (newTimeRange: TimeRange) => {
@@ -160,8 +162,22 @@ export function DashboardContainer({ className = '' }: DashboardContainerProps) 
     </button>
   );
 
-  // Don't show dashboard if not mounted or no wallet connected
-  if (!mounted || !effectivePublicKey) {
+  // Don't show dashboard if not mounted
+  if (!mounted) {
+    return (
+      <div className={`space-y-6 ${className}`}>
+        <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl p-6">
+          <div className="text-center py-8">
+            <RefreshCw className="w-8 h-8 text-gray-400 mx-auto mb-4 animate-spin" />
+            <p className="text-gray-300">Loading performance dashboard...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show wallet required when no wallet is connected
+  if (!effectivePublicKey) {
     return (
       <div className={`space-y-6 ${className}`}>
         <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl p-6">
@@ -169,6 +185,12 @@ export function DashboardContainer({ className = '' }: DashboardContainerProps) 
             <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-white mb-2">Wallet Required</h3>
             <p className="text-gray-300">Connect your Solana wallet to view performance data and trading metrics.</p>
+            <button
+              onClick={() => window.location.href = '/'}
+              className="mt-4 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold"
+            >
+              Return to Home
+            </button>
           </div>
         </div>
       </div>

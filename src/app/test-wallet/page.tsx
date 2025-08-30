@@ -1,9 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-
-// Import type definitions for Phantom wallet
-import { PhantomProvider } from '@/types/phantom';
+import React, { useState, useEffect, useCallback } from 'react';
 
 export default function TestWalletPage() {
   const [phantomStatus, setPhantomStatus] = useState<string>('checking');
@@ -22,9 +19,9 @@ export default function TestWalletPage() {
     if (typeof window !== 'undefined') {
       checkPhantomStatus();
     }
-  }, []);
+  }, [checkPhantomStatus]);
 
-  const checkPhantomStatus = () => {
+  const checkPhantomStatus = useCallback(() => {
     addLog('🔍 Checking Phantom wallet availability...');
     
     if (typeof window !== 'undefined' && window.solana) {
@@ -48,7 +45,7 @@ export default function TestWalletPage() {
       setPhantomStatus('not-found');
       addLog('❌ No Solana wallet provider found');
     }
-  };
+  }, []);
 
   const testDirectConnection = async () => {
     addLog('🚀 === STARTING DIRECT CONNECTION TEST ===');
@@ -84,9 +81,9 @@ export default function TestWalletPage() {
         response = await window.solana.connect({
           onlyIfTrusted: false
         });
-      } catch (connectError: any) {
-        addLog(`🚨 Connection error: ${connectError.message}`);
-        addLog(`🚨 Error code: ${connectError.code}`);
+      } catch (connectError: unknown) {
+        addLog(`🚨 Connection error: ${connectError instanceof Error ? connectError.message : 'Unknown error'}`);
+        addLog(`🚨 Error code: ${(connectError as { code?: string })?.code || 'Unknown'}`);
         throw connectError;
       }
 
@@ -101,11 +98,11 @@ export default function TestWalletPage() {
         throw new Error('No response or public key received');
       }
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       setConnectionStatus('error');
-      addLog(`❌ Connection failed: ${error.message}`);
-      if (error.code) {
-        addLog(`❌ Error code: ${error.code}`);
+      addLog(`❌ Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      if ((error as { code?: string })?.code) {
+        addLog(`❌ Error code: ${(error as { code?: string }).code}`);
       }
     }
   };
@@ -123,8 +120,8 @@ export default function TestWalletPage() {
       } else {
         addLog('❌ No disconnect method available');
       }
-    } catch (error: any) {
-      addLog(`❌ Disconnect failed: ${error.message}`);
+    } catch (error: unknown) {
+      addLog(`❌ Disconnect failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -222,7 +219,7 @@ export default function TestWalletPage() {
           
           <div className="bg-slate-900 rounded p-4 h-64 overflow-y-auto font-mono text-sm">
             {logs.length === 0 ? (
-              <div className="text-slate-500">No logs yet. Click "Re-check Phantom Status" to start.</div>
+              <div className="text-slate-500">No logs yet. Click &quot;Re-check Phantom Status&quot; to start.</div>
             ) : (
               logs.map((log, index) => (
                 <div key={index} className="text-green-400 mb-1">
@@ -238,20 +235,20 @@ export default function TestWalletPage() {
           <h3 className="text-lg font-semibold text-blue-300 mb-3">🧪 Test Instructions</h3>
           <ol className="text-blue-200 space-y-2 text-sm">
             <li><strong>1.</strong> Make sure Phantom wallet extension is installed</li>
-            <li><strong>2.</strong> Click "Re-check Phantom Status" to verify detection</li>
-            <li><strong>3.</strong> Click "Test Direct Connection" - this MUST open the Phantom OAuth modal</li>
+            <li><strong>2.</strong> Click &quot;Re-check Phantom Status&quot; to verify detection</li>
+            <li><strong>3.</strong> Click &quot;Test Direct Connection&quot; - this MUST open the Phantom OAuth modal</li>
             <li><strong>4.</strong> In the modal, you should see options for:</li>
             <li className="ml-6">• Email/Google/Apple sign-in</li>
             <li className="ml-6">• Import seed phrase</li>
             <li className="ml-6">• Create new wallet</li>
             <li className="ml-6">• Browser extension login</li>
-            <li><strong>5.</strong> Complete authentication and verify connection status changes to "connected"</li>
+            <li><strong>5.</strong> Complete authentication and verify connection status changes to &quot;connected&quot;</li>
             <li><strong>6.</strong> Test disconnection to ensure it works properly</li>
           </ol>
           
           <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-600/20 rounded">
             <p className="text-yellow-200 text-sm">
-              <strong>Expected Behavior:</strong> Clicking "Test Direct Connection" should ALWAYS show the Phantom OAuth modal, 
+              <strong>Expected Behavior:</strong> Clicking &quot;Test Direct Connection&quot; should ALWAYS show the Phantom OAuth modal, 
               even if you were previously connected. The modal gives users all authentication options.
             </p>
           </div>

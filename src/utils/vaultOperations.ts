@@ -2,14 +2,14 @@
 
 import { Connection, PublicKey, Transaction, SystemProgram } from '@solana/web3.js'
 import { 
-  TOKEN_PROGRAM_ID, 
-  ASSOCIATED_TOKEN_PROGRAM_ID, 
+  // TOKEN_PROGRAM_ID, // Unused
+  // ASSOCIATED_TOKEN_PROGRAM_ID, // Unused
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
   createTransferInstruction,
   getAccount
 } from '@solana/spl-token'
-import * as anchor from '@coral-xyz/anchor'
+// import * as anchor from '@coral-xyz/anchor' // Unused
 
 /**
  * Vault Operations Utilities
@@ -70,7 +70,7 @@ export async function checkTokenAccountBalance(
       exists: true,
       balance: Number(account.amount)
     }
-  } catch (error) {
+  } catch {
     return {
       exists: false,
       balance: 0
@@ -85,7 +85,7 @@ export async function createVaultInitTransaction(
   connection: Connection,
   owner: PublicKey
 ): Promise<{ transaction: Transaction; vaultAddress: PublicKey }> {
-  const [vaultAddress, bump] = getVaultAddress(owner)
+  const [vaultAddress /* _bump */] = getVaultAddress(owner)
   
   // Get minimum rent exemption
   const rentExemption = await connection.getMinimumBalanceForRentExemption(200)
@@ -212,11 +212,11 @@ export async function createWithdrawTransaction(
  * Create bot authorization transaction
  */
 export async function createBotAuthorizationTransaction(
-  connection: Connection,
-  owner: PublicKey,
-  vaultAddress: PublicKey,
-  botAuthority: PublicKey,
-  authorize: boolean // true to authorize, false to revoke
+  /* _connection: Connection,
+  _owner: PublicKey,
+  _vaultAddress: PublicKey,
+  _botAuthority: PublicKey,
+  _authorize: boolean */ // true to authorize, false to revoke
 ): Promise<Transaction> {
   const transaction = new Transaction()
   
@@ -256,7 +256,7 @@ export async function getVaultAccountData(
       isActive: true,
       createdAt: Date.now()
     }
-  } catch (error) {
+  } catch {
     console.error('Error fetching vault data:', error)
     return null
   }
@@ -273,7 +273,7 @@ export async function getVaultUSDCBalance(
     const vaultUSDCAccount = await getVaultUSDCTokenAccount(vaultAddress)
     const accountInfo = await checkTokenAccountBalance(connection, vaultUSDCAccount)
     return accountInfo.balance / Math.pow(10, USDC_DECIMALS)
-  } catch (error) {
+  } catch {
     console.error('Error fetching vault USDC balance:', error)
     return 0
   }
@@ -319,7 +319,7 @@ export function validateUSDCAmount(amount: number, maxAmount?: number): string |
   return null
 }
 
-export default {
+const vaultOperations = {
   getVaultAddress,
   getUSDCTokenAccount,
   getVaultUSDCTokenAccount,
@@ -333,4 +333,6 @@ export default {
   formatUSDCAmount,
   parseUSDCAmount,
   validateUSDCAmount
-}
+};
+
+export default vaultOperations;

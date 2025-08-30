@@ -3,7 +3,7 @@
  * Specialized parser for extracting swap data from Raydium AMM transactions
  */
 
-import { PublicKey } from '@solana/web3.js';
+// import { PublicKey } from '@solana/web3.js'; // Unused
 import { SolanaTransaction, RaydiumSwap, AnalysisError, TokenBalance } from '@/types/trader-intelligence';
 import { RAYDIUM_PROGRAM_IDS, WHITELISTED_TOKENS } from '@/lib/constants';
 
@@ -36,7 +36,7 @@ export class RaydiumTransactionParser {
         if (swap) {
           swaps.push(swap);
         }
-      } catch (error) {
+      } catch {
         console.warn(`⚠️ Error parsing transaction ${transaction.signature}:`, error);
         errors.push({
           type: 'parsing_error',
@@ -146,9 +146,9 @@ export class RaydiumTransactionParser {
    */
   private extractSwapFromBalanceChanges(
     transaction: SolanaTransaction,
-    walletAddress: string,
-    walletIndex: number
-  ): { tokenIn: any; tokenOut: any } | null {
+    walletAddress: string
+    /* _walletIndex: number */
+  ): { tokenIn: { mint: string; amount: number }; tokenOut: { mint: string; amount: number } } | null {
     const preTokenBalances = transaction.meta?.preTokenBalances || [];
     const postTokenBalances = transaction.meta?.postTokenBalances || [];
 
@@ -310,7 +310,7 @@ export class RaydiumTransactionParser {
   /**
    * Add new token to whitelist
    */
-  addWhitelistedToken(mint: string, symbol: string): void {
+  addWhitelistedToken(mint: string /* _symbol: string */): void {
     this.whitelistedTokens.add(mint);
   }
 
@@ -349,14 +349,14 @@ export class RaydiumTransactionParser {
     criteria: {
       minAmount?: number;
       maxAmount?: number;
-      startTime?: number;
+      _startTime?: number;
       endTime?: number;
       tokenMints?: string[];
     }
   ): RaydiumSwap[] {
     return swaps.filter(swap => {
       // Time range filter
-      if (criteria.startTime && swap.timestamp < criteria.startTime) return false;
+      if (criteria._startTime && swap.timestamp < criteria._startTime) return false;
       if (criteria.endTime && swap.timestamp > criteria.endTime) return false;
 
       // Amount filters (based on tokenIn amount)

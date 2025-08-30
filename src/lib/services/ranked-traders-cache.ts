@@ -3,8 +3,8 @@
  * High-performance caching layer for bot consumption of ranked traders
  */
 
-import { XORJTrustScore } from './xorj-trust-score';
-import { WalletPerformanceMetrics } from '@/types/trader-intelligence';
+// import { XORJTrustScore } from './xorj-trust-score'; // Unused
+// import { WalletPerformanceMetrics } from '@/types/trader-intelligence'; // Unused
 
 export interface RankedTraderPayload {
   walletAddress: string;
@@ -123,7 +123,7 @@ export class RankedTradersCache {
     limit: number
   ): Promise<RankedTradersResponse> {
     this.isRefreshing = true;
-    const startTime = Date.now();
+    const _startTime = Date.now();
 
     try {
       // This would typically call your trader intelligence engine
@@ -155,8 +155,8 @@ export class RankedTradersCache {
       // Cleanup old entries
       this.cleanupExpiredEntries();
 
-      const processingTime = Date.now() - startTime;
-      console.log(`✅ Ranked traders cache refreshed in ${processingTime}ms`);
+      const _processingTime = Date.now() - _startTime;
+      console.log(`✅ Ranked traders cache refreshed in ${_processingTime}ms`);
 
       return cachedResponse;
 
@@ -252,9 +252,9 @@ export class RankedTradersCache {
    * Wait for ongoing refresh to complete
    */
   private async waitForRefresh(maxWaitMs: number = 30000): Promise<void> {
-    const startTime = Date.now();
+    const _startTime = Date.now();
     
-    while (this.isRefreshing && (Date.now() - startTime) < maxWaitMs) {
+    while (this.isRefreshing && (Date.now() - _startTime) < maxWaitMs) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   }

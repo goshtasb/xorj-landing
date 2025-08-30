@@ -93,7 +93,10 @@ class ConfigurationUpdateRequest(BaseModel):
 # Dependency: Validate API Key
 async def validate_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Validate API key for service authentication"""
-    api_key = os.getenv("BOT_SERVICE_API_KEY", "development-key")
+    api_key = os.getenv("BOT_SERVICE_API_KEY")
+    
+    if not api_key:
+        raise HTTPException(status_code=500, detail="BOT_SERVICE_API_KEY environment variable not configured")
     
     if credentials.credentials != api_key:
         raise HTTPException(status_code=403, detail="Invalid API key")

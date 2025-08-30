@@ -1,0 +1,13 @@
+# Grafana Dashboard Provisioning for XORJ V1 Staging
+apiVersion: 1
+
+providers:
+  - name: 'XORJ V1 Dashboards'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

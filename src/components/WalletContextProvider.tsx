@@ -7,10 +7,10 @@ declare global {
   interface Window {
     solana?: {
       isPhantom?: boolean;
-      connect?: () => Promise<any>;
+      connect?: () => Promise<{ publicKey: { toString(): string } }>;
       disconnect?: () => Promise<void>;
-      on?: (event: string, callback: Function) => void;
-      request?: (method: string, params?: any) => Promise<any>;
+      on?: (event: string, callback: (...args: unknown[]) => void) => void;
+      request?: (method: string, params?: Record<string, unknown>) => Promise<unknown>;
     };
   }
 }

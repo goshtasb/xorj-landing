@@ -1,0 +1,183 @@
+{
+  "testSuite": "XORJ Staging Chaos Engineering Simulation",
+  "executionTime": "2025-08-20T11:02:19.368Z",
+  "environment": "Staging Simulation",
+  "summary": {
+    "totalTests": 13,
+    "passed": 13,
+    "failed": 0,
+    "criticalTests": 0,
+    "successRate": "100.0"
+  },
+  "testCategories": {
+    "rpcFailures": [
+      {
+        "testType": "RPC_FAILURE_HANDLING",
+        "description": "System gracefully handles RPC timeouts",
+        "status": "PASSED",
+        "timestamp": "2025-08-20T11:02:10.353Z",
+        "details": {
+          "critical": true,
+          "message": "Trade marked as FAILED instead of hanging indefinitely",
+          "tradeStatus": "FAILED",
+          "alertGenerated": true
+        },
+        "critical": true
+      },
+      {
+        "testType": "RPC_RECOVERY",
+        "description": "System recovers and processes trades after RPC restoration",
+        "status": "PASSED",
+        "timestamp": "2025-08-20T11:02:11.356Z",
+        "details": {
+          "critical": true,
+          "message": "New trade executed successfully after RPC recovery",
+          "recoveryTradeStatus": "CONFIRMED"
+        },
+        "critical": true
+      }
+    ],
+    "databaseFailures": [
+      {
+        "testType": "DB_FAILURE_HANDLING",
+        "description": "System gracefully handles database connection loss",
+        "status": "PASSED",
+        "timestamp": "2025-08-20T11:02:13.357Z",
+        "details": {
+          "critical": true,
+          "message": "Trade properly marked as FAILED due to DB connection loss",
+          "tradeStatus": "FAILED",
+          "alertGenerated": true
+        },
+        "critical": true
+      },
+      {
+        "testType": "DB_RECOVERY",
+        "description": "System processes trades successfully after database recovery",
+        "status": "PASSED",
+        "timestamp": "2025-08-20T11:02:14.364Z",
+        "details": {
+          "critical": true,
+          "message": "Database recovery successful, new trades executing normally",
+          "recoveryTradeStatus": "CONFIRMED"
+        },
+        "critical": true
+      }
+    ],
+    "onchainFailures": [
+      {
+        "testType": "ONCHAIN_FAILURE_HANDLING",
+        "description": "System properly handles on-chain transaction failures",
+        "status": "PASSED",
+        "timestamp": "2025-08-20T11:02:17.367Z",
+        "details": {
+          "critical": true,
+          "message": "On-chain failure properly detected and trade marked as FAILED",
+          "failureReason": "SLIPPAGE_EXCEEDED",
+          "actualSlippage": 2.3
+        },
+        "critical": true
+      },
+      {
+        "testType": "ONCHAIN_DUPLICATE_PREVENTION",
+        "description": "No duplicate on-chain transactions submitted",
+        "status": "PASSED",
+        "timestamp": "2025-08-20T11:02:19.368Z",
+        "details": {
+          "critical": true,
+          "message": "Found 0 duplicate on-chain transactions",
+          "duplicateCount": 0
+        },
+        "critical": true
+      }
+    ],
+    "systemResilience": [
+      {
+        "testType": "RPC_RECOVERY",
+        "description": "System recovers and processes trades after RPC restoration",
+        "status": "PASSED",
+        "timestamp": "2025-08-20T11:02:11.356Z",
+        "details": {
+          "critical": true,
+          "message": "New trade executed successfully after RPC recovery",
+          "recoveryTradeStatus": "CONFIRMED"
+        },
+        "critical": true
+      },
+      {
+        "testType": "DB_RECOVERY",
+        "description": "System processes trades successfully after database recovery",
+        "status": "PASSED",
+        "timestamp": "2025-08-20T11:02:14.364Z",
+        "details": {
+          "critical": true,
+          "message": "Database recovery successful, new trades executing normally",
+          "recoveryTradeStatus": "CONFIRMED"
+        },
+        "critical": true
+      },
+      {
+        "testType": "ALERT_SYSTEM",
+        "description": "Alert system generates appropriate notifications for failures",
+        "status": "PASSED",
+        "timestamp": "2025-08-20T11:02:19.368Z",
+        "details": {
+          "critical": false,
+          "message": "Generated 3 alerts (1 critical)",
+          "totalAlerts": 3,
+          "criticalAlerts": 1
+        },
+        "critical": false
+      },
+      {
+        "testType": "DATA_CONSISTENCY",
+        "description": "Trade state data remains consistent after failures",
+        "status": "PASSED",
+        "timestamp": "2025-08-20T11:02:19.368Z",
+        "details": {
+          "critical": true,
+          "message": "Trade states: 0 pending, 3 confirmed, 3 failed",
+          "pendingTrades": 0,
+          "confirmedTrades": 3,
+          "failedTrades": 3
+        },
+        "critical": true
+      },
+      {
+        "testType": "RECOVERY_TIME",
+        "description": "System recovery time within acceptable limits",
+        "status": "PASSED",
+        "timestamp": "2025-08-20T11:02:19.368Z",
+        "details": {
+          "critical": false,
+          "message": "2 successful recovery trades executed",
+          "recoveryTradeCount": 2
+        },
+        "critical": false
+      },
+      {
+        "testType": "STATE_MACHINE_INTEGRITY",
+        "description": "Trade state machine maintains valid states",
+        "status": "PASSED",
+        "timestamp": "2025-08-20T11:02:19.368Z",
+        "details": {
+          "critical": true,
+          "message": "Found 0 trades in invalid states",
+          "invalidStateCount": 0
+        },
+        "critical": true
+      }
+    ]
+  },
+  "systemState": {
+    "totalTrades": 6,
+    "confirmedTrades": 3,
+    "failedTrades": 3,
+    "alertsGenerated": 3
+  },
+  "criticalFindings": [],
+  "recommendations": [
+    "All chaos tests passed - system demonstrates production-level resilience"
+  ],
+  "productionReadiness": "APPROVED"
+}

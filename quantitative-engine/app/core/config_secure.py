@@ -5,8 +5,7 @@ Configuration management with secrets manager integration
 
 import asyncio
 from typing import List, Optional
-from pydantic import BaseSettings, validator
-from pydantic_settings import BaseSettings as PydanticBaseSettings
+from pydantic_settings import BaseSettings
 import os
 import logging
 
@@ -15,7 +14,7 @@ from .secrets import SecretsManager, get_secrets_manager
 logger = logging.getLogger(__name__)
 
 
-class SecureSettings(PydanticBaseSettings):
+class SecureSettings(BaseSettings):
     """
     SR-2: Secure application settings with secrets manager integration
     NO sensitive data in environment variables or source code
@@ -64,6 +63,9 @@ class SecureSettings(PydanticBaseSettings):
     _database_url: Optional[str] = None
     _redis_url: Optional[str] = None
     _internal_api_key: Optional[str] = None
+    _jwt_secret_key: Optional[str] = None
+    _internal_bot_service_url: Optional[str] = None
+    _internal_bot_api_key: Optional[str] = None
     _helius_api_key: Optional[str] = None
     _coingecko_api_key: Optional[str] = None
     _secrets_manager: Optional[SecretsManager] = None
@@ -105,6 +107,24 @@ class SecureSettings(PydanticBaseSettings):
         if not self._internal_api_key:
             raise RuntimeError("Internal API key not available from secrets manager")
         
+        # Load JWT secret key for user session validation
+        self._jwt_secret_key = await self._secrets_manager.get_api_key("jwt_secret")
+        if not self._jwt_secret_key:
+            # Generate a secure default for development
+            import secrets
+            self._jwt_secret_key = secrets.token_urlsafe(32)
+            logger.warning("JWT secret key not found in secrets manager - using generated key")
+        
+        # Load internal bot service configuration
+        self._internal_bot_service_url = await self._secrets_manager.get_api_key("internal_bot_service_url")
+        self._internal_bot_api_key = await self._secrets_manager.get_api_key("internal_bot_api_key")
+        
+        # Set defaults for development
+        if not self._internal_bot_service_url:
+            self._internal_bot_service_url = "http://localhost:8000"
+        if not self._internal_bot_api_key:
+            self._internal_bot_api_key = "development-key"
+        
         # Load external API keys
         self._helius_api_key = await self._secrets_manager.get_api_key("helius")
         self._coingecko_api_key = await self._secrets_manager.get_api_key("coingecko")
@@ -132,6 +152,23 @@ class SecureSettings(PydanticBaseSettings):
         if self._internal_api_key is None:
             raise RuntimeError("Internal API key not loaded - call initialize_secrets() first")
         return self._internal_api_key
+    
+    @property
+    def jwt_secret_key(self) -> str:
+        """Get JWT secret key for user session validation"""
+        if self._jwt_secret_key is None:
+            raise RuntimeError("JWT secret key not loaded - call initialize_secrets() first")
+        return self._jwt_secret_key
+    
+    @property
+    def internal_bot_service_url(self) -> str:
+        """Get internal bot service URL"""
+        return self._internal_bot_service_url or "http://localhost:8000"
+    
+    @property
+    def internal_bot_api_key(self) -> str:
+        """Get internal bot service API key"""
+        return self._internal_bot_api_key or "development-key"
     
     @property
     def helius_api_key(self) -> Optional[str]:
@@ -198,6 +235,9 @@ class SecureSettings(PydanticBaseSettings):
             "database_url": "***MASKED***" if self._database_url else "NOT_LOADED",
             "redis_url": "***MASKED***" if self._redis_url else "NOT_LOADED",
             "api_key": "***MASKED***" if self._internal_api_key else "NOT_LOADED",
+            "jwt_secret_key": "***MASKED***" if self._jwt_secret_key else "NOT_LOADED",
+            "internal_bot_service_url": "***MASKED***" if self._internal_bot_service_url else "NOT_SET",
+            "internal_bot_api_key": "***MASKED***" if self._internal_bot_api_key else "NOT_SET",
             "helius_api_key": "***MASKED***" if self._helius_api_key else "NOT_SET",
             "supported_tokens": len(self.supported_token_list),
             "cors_origins": self.cors_allowed_origins

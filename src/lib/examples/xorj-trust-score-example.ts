@@ -114,8 +114,8 @@ export async function exampleWalletScoringPipeline() {
 
     return result;
 
-  } catch (error) {
-    console.error('❌ Pipeline failed:', error);
+  } catch {
+    console.error('❌ Pipeline failed:');
     throw error;
   }
 }
@@ -272,8 +272,8 @@ export async function runAllTrustScoreExamples() {
     
     console.log('✅ All XORJ Trust Score examples completed!');
     
-  } catch (error) {
-    console.error('❌ Example execution failed:', error);
+  } catch {
+    console.error('❌ Example execution failed:');
     throw error;
   }
 }

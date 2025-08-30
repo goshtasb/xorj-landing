@@ -25,7 +25,7 @@ interface ApiResponse<T> {
 }
 
 export async function GET(request: NextRequest) {
-  const startTime = Date.now();
+  const _startTime = Date.now();
   const requestId = `user_status_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
   try {
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     // Validate wallet address format
     try {
       new PublicKey(walletAddress);
-    } catch (error) {
+    } catch {
       console.warn(`⚠️ Invalid wallet address format: ${walletAddress} - ${requestId}`);
       return NextResponse.json<ApiResponse<null>>({
         success: false,
@@ -64,9 +64,9 @@ export async function GET(request: NextRequest) {
     // For now, we'll simulate the bot status based on wallet characteristics
     const statusResponse = await checkBotStatus(walletAddress);
 
-    const processingTime = Date.now() - startTime;
+    const _processingTime = Date.now() - _startTime;
     
-    console.log(`✅ User status retrieved: ${requestId} - ${processingTime}ms`);
+    console.log(`✅ User status retrieved: ${requestId} - ${_processingTime}ms`);
     console.log(`🤖 Bot active: ${statusResponse.isBotActive}`);
 
     return NextResponse.json<ApiResponse<UserStatusResponse>>({
@@ -77,17 +77,16 @@ export async function GET(request: NextRequest) {
     }, {
       headers: {
         'Cache-Control': 'private, max-age=30', // Cache for 30 seconds
-        'X-Processing-Time': `${processingTime}ms`
+        'X-Processing-Time': `${_processingTime}ms`
       }
     });
 
-  } catch (error) {
-    const processingTime = Date.now() - startTime;
-    console.error(`❌ User status error ${requestId}:`, error);
+  } catch {
+    console.error(`❌ User status error ${requestId}:`);
     
     return NextResponse.json<ApiResponse<null>>({
       success: false,
-      error: `Failed to retrieve user status: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      error: 'Failed to retrieve user status',
       timestamp: Date.now(),
       requestId
     }, { status: 500 });
@@ -116,7 +115,7 @@ async function checkBotStatus(walletAddress: string): Promise<UserStatusResponse
         authorizationTxSignature: botData.status === 'active' ? generateMockTxSignature() : undefined
       };
     }
-  } catch (error) {
+  } catch {
     console.log(`Bot service unavailable for ${walletAddress}, using mock data`);
   }
 

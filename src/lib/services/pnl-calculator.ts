@@ -9,7 +9,7 @@ import {
   TokenPosition, 
   PurchaseLot,
   CompletedTrade, 
-  TokenPriceData,
+  // TokenPriceData, // Unused
   AnalysisError 
 } from '@/types/trader-intelligence';
 import { priceDataService } from './price-data-service';
@@ -50,8 +50,8 @@ export class PnLCalculator {
           console.log(`📊 P&L Progress: ${i}/${sortedSwaps.length} swaps processed`);
         }
 
-      } catch (error) {
-        console.error(`❌ Error processing swap ${swap.signature}:`, error);
+      } catch {
+        console.error(`❌ Error processing swap ${swap.signature}:`);
         this.errors.push({
           type: 'calculation_error',
           message: `P&L calculation error: ${error}`,
@@ -297,7 +297,7 @@ export class PnLCalculator {
       }
 
       return 0;
-    } catch (error) {
+    } catch {
       console.warn(`⚠️ Failed to calculate gas fees in USD:`, error);
       return 0;
     }

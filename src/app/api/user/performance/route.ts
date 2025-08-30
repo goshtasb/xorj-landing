@@ -34,7 +34,6 @@ interface ChartDataPoint {
 
 // --- API Handler ---
 export async function GET(request: NextRequest) {
-  const startTime = Date.now();
   const requestId = `perf_${uuidv4()}`;
 
   try {
@@ -54,21 +53,59 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Invalid wallet address format' }, { status: 400 });
     }
 
-    let performanceData = await fetchRealPerformance(walletAddress, timeRange);
+    // PHASE 1: Use read-through caching for performance data
+    const { cachedData } = await import('@/lib/cacheLayer');
+    
+    const cacheKey = `user:${walletAddress}:performance:${timeRange}`;
+    const cachedResult = await cachedData.withCache(
+      cacheKey,
+      async () => {
+        console.log(`🗄️ Cache MISS - fetching performance data for ${walletAddress}:${timeRange}`);
+        
+        // Try real performance first
+        let performanceData = await fetchRealPerformance(walletAddress, timeRange);
+        
+        // Fallback to mock if real data not available
+        if (performanceData === null) {
+          performanceData = await generateMockPerformance(walletAddress, timeRange);
+        }
+        
+        return performanceData;
+      },
+      15 // 15 seconds TTL for performance data
+    );
 
-    if (performanceData === null) {
-      performanceData = generateMockPerformance(walletAddress, timeRange);
+    if (cachedResult.success && cachedResult.data) {
+      console.log(`🎯 Serving performance data for ${walletAddress} (fromCache: ${cachedResult.fromCache})`);
+      
+      return NextResponse.json({ success: true, data: cachedResult.data, requestId }, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
+          'X-Request-ID': requestId,
+          'X-Cache-Status': cachedResult.fromCache ? 'HIT' : 'MISS'
+        },
+      });
+    } else {
+      // Cache failed - fallback to original logic
+      console.error(`❌ Cache layer failed for ${walletAddress} performance:`, cachedResult.error);
+      
+      let performanceData = await fetchRealPerformance(walletAddress, timeRange);
+      
+      if (performanceData === null) {
+        performanceData = await generateMockPerformance(walletAddress, timeRange);
+      }
+
+      return NextResponse.json({ success: true, data: performanceData, requestId }, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
+          'X-Request-ID': requestId,
+          'X-Cache-Status': 'ERROR'
+        },
+      });
     }
 
-    return NextResponse.json({ success: true, data: performanceData, requestId }, {
-      headers: {
-        'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
-        'X-Request-ID': requestId,
-      },
-    });
-
-  } catch (error) {
-    console.error(`[${requestId}] Performance API Error:`, error);
+  } catch {
+    console.error(`[${requestId}] Performance API Error:`);
     return NextResponse.json({ success: false, error: 'An internal error occurred.' }, { status: 500 });
   }
 }
@@ -123,47 +160,58 @@ async function fetchRealPerformance(walletAddress: string, timeRange: '30D' | '9
       lastUpdated: Date.now(),
     };
 
-  } catch (error) {
-    console.error(`Bot performance API connection failed for ${walletAddress}:`, error);
+  } catch {
+    console.error(`Bot performance API connection failed for ${walletAddress}:`);
     return null;
   }
 }
 
 /**
- * Generates consistent, deterministic mock performance data as a fallback.
+ * Fetch user's investment amount from database directly (avoiding HTTP call)
  */
-function generateMockPerformance(walletAddress: string, timeRange: '30D' | '90D' | 'ALL'): PerformanceData {
+async function fetchUserInvestmentAmount(walletAddress: string): Promise<number> {
+  try {
+    // TODO: Replace with direct database query when database integration is complete
+    // For now, check localStorage-style mock data or return default
+    
+    // In a real implementation, this would be:
+    // const userSettings = await db.userSettings.findFirst({ where: { walletAddress } });
+    // return userSettings?.investmentAmount || 1000;
+    
+    console.log(`📊 Fetching investment amount for ${walletAddress} - using default for now`);
+    return 1000; // Default investment amount
+  } catch {
+    console.error('Error fetching investment amount:');
+    return 1000; // Default fallback
+  }
+}
+
+/**
+ * Generates zero/empty performance data for users with no trading history yet.
+ */
+async function generateMockPerformance(walletAddress: string, timeRange: '30D' | '90D' | 'ALL'): Promise<PerformanceData> {
   const days = timeRange === '30D' ? 30 : timeRange === '90D' ? 90 : 365;
-  let seed = walletAddress.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const pseudoRandom = () => {
-    seed = (seed * 9301 + 49297) % 233280;
-    return seed / 233280;
-  };
-
   const chartData: ChartDataPoint[] = [];
-  const initialValue = 5000 + pseudoRandom() * 15000;
-  let currentValue = initialValue;
 
+  // Get user's investment amount for proper baseline
+  const userInvestmentAmount = await fetchUserInvestmentAmount(walletAddress);
+
+  // Create empty chart data - all zeros to show no trading activity
   for (let i = 0; i < days; i++) {
-    const dailyReturn = (pseudoRandom() - 0.48) * 0.1; // Skew slightly positive
-    currentValue *= (1 + dailyReturn);
     chartData.push({
       timestamp: Date.now() - (days - i) * 24 * 60 * 60 * 1000,
-      value: parseFloat(currentValue.toFixed(2)),
+      value: userInvestmentAmount, // Start with investment amount, no gains/losses yet
     });
   }
 
-  const finalValue = currentValue;
-  const netROI = ((finalValue - initialValue) / initialValue) * 100;
-
   return {
-    currentVaultValueUSD: parseFloat(finalValue.toFixed(2)),
-    netROI: parseFloat(netROI.toFixed(2)),
-    maxDrawdownPercent: 15 + pseudoRandom() * 20,
+    currentVaultValueUSD: userInvestmentAmount, // Current value equals investment (no trading yet)
+    netROI: 0, // No return yet
+    maxDrawdownPercent: 0, // No losses yet
     chartData,
-    totalTrades: 50 + Math.floor(pseudoRandom() * 200),
-    winRate: 55 + pseudoRandom() * 20,
-    sharpeRatio: 0.8 + pseudoRandom() * 1.5,
+    totalTrades: 0,
+    winRate: 0,
+    sharpeRatio: 0,
     timeRange,
     lastUpdated: Date.now(),
   };

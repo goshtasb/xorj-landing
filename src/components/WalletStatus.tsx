@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { useWallet } from '@solana/wallet-adapter-react'
-import { CheckCircle, XCircle, Clock, AlertTriangle, Copy, X } from 'lucide-react'
+import { CheckCircle, XCircle, Clock, Copy, X } from 'lucide-react'
 
 /**
  * Props for WalletStatus component
@@ -189,7 +189,7 @@ export function WalletStatus({ className = '', detailed = false, modal = false, 
  * A minimal status indicator for use in headers or compact spaces
  */
 export function CompactWalletStatus({ className = '' }: { className?: string }) {
-  const { connected, connecting, wallet } = useWallet()
+  const { connected, connecting } = useWallet()
   
   const getStatusColor = () => {
     if (connected) return 'bg-green-400'

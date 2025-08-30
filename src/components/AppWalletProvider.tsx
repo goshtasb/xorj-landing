@@ -22,7 +22,12 @@ export default function AppWalletProvider({
   
   // Initialize wallets - Phantom is included by default
   const wallets = useMemo(
-    () => [new PhantomWalletAdapter()],
+    () => [
+      new PhantomWalletAdapter({
+        // Explicitly prefer Phantom over MetaMask
+        network,
+      })
+    ],
     [network]
   );
 
@@ -33,7 +38,20 @@ export default function AppWalletProvider({
         autoConnect={true}
         localStorageKey="xorj-wallet"
         onError={(error) => {
-          console.log('Wallet connection error:', error);
+          console.error('Wallet connection error:', error);
+          
+          // Filter out MetaMask-related errors for Solana wallet adapter
+          if (error.message && error.message.includes('MetaMask')) {
+            console.warn('MetaMask detected but this is a Solana app. Please use Phantom wallet.');
+            return;
+          }
+          
+          // Show user-friendly error messages
+          if (error.message && error.message.includes('User rejected')) {
+            console.log('User cancelled wallet connection');
+          } else {
+            console.error('Unexpected wallet error:', error);
+          }
         }}
       >
         <WalletModalProvider>{children}</WalletModalProvider>

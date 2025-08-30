@@ -43,9 +43,8 @@ interface OnboardingTutorialProps {
 
 export function OnboardingTutorial({ isOpen, onClose, onComplete }: OnboardingTutorialProps) {
   const [currentStep, setCurrentStep] = useState(0)
-  const [completedSteps, setCompletedSteps] = useState<Set<number>>(new Set())
-  const { publicKey, connected, connecting, connect } = useWallet()
-  const { setVisible } = useWalletModal()
+  const { publicKey, connected } = useWallet()
+  useWalletModal()
 
   // Reset state when modal opens
   useEffect(() => {
@@ -109,7 +108,7 @@ export function OnboardingTutorial({ isOpen, onClose, onComplete }: OnboardingTu
       title: 'Setup Complete!',
       description: 'You\'re ready to start intelligent Solana investing',
       icon: <Check className="h-6 w-6" />,
-      component: <CompleteStep onComplete={onComplete} />
+      component: <CompleteStep />
     }
   ]
 
@@ -253,8 +252,8 @@ function WelcomeStep() {
       <div className="space-y-4">
         <h3 className="text-2xl font-bold text-white">Welcome to the Future of Solana Investing</h3>
         <p className="text-slate-300 text-lg leading-relaxed">
-          XORJ combines artificial intelligence with Solana's speed to create the most advanced 
-          non-custodial trading platform. In just a few steps, you'll have your own AI-powered 
+          XORJ combines artificial intelligence with Solana&apos;s speed to create the most advanced 
+          non-custodial trading platform. In just a few steps, you&apos;ll have your own AI-powered 
           vault ready to capitalize on Solana ecosystem opportunities.
         </p>
         
@@ -324,7 +323,7 @@ function WalletStep() {
         // This won't actually connect but will show the UI state
         console.log('✅ Onboarding: Manual wallet key entered for testing:', testKey.toString())
         alert(`Test key entered: ${testKey.toString().slice(0, 8)}...${testKey.toString().slice(-8)}`)
-      } catch (err) {
+      } catch {
         alert('Invalid public key format')
         return
       }
@@ -370,7 +369,7 @@ function WalletStep() {
               )}
             </button>
             <p className="text-xs text-slate-400 mt-2">
-              Or click "Skip" to continue exploring without a wallet
+              Or click &quot;Skip&quot; to continue exploring without a wallet
             </p>
           </div>
 
@@ -400,21 +399,22 @@ function WalletStep() {
               <div>
                 <h4 className="text-white font-medium mb-1">Why Connect Later?</h4>
                 <p className="text-sm text-slate-300">
-                  Connecting a wallet is only required when you're ready to create a vault and start trading. 
+                  Connecting a wallet is only required when you&apos;re ready to create a vault and start trading. 
                   You can explore all features and learn how XORJ works first.
                 </p>
               </div>
             </div>
           </div>
 
-          {/* Manual connection for testing */}
-          <div className="border-t border-slate-700 pt-4">
-            <button
-              onClick={() => setShowManualInput(!showManualInput)}
-              className="w-full text-sm text-slate-400 hover:text-slate-300"
-            >
-              {showManualInput ? 'Hide' : 'Show'} manual connection (for testing)
-            </button>
+          {/* Manual connection for testing - disabled in production */}
+          {process.env.NODE_ENV !== 'production' && (
+            <div className="border-t border-slate-700 pt-4">
+              <button
+                onClick={() => setShowManualInput(!showManualInput)}
+                className="w-full text-sm text-slate-400 hover:text-slate-300"
+              >
+                {showManualInput ? 'Hide' : 'Show'} manual connection (for testing)
+              </button>
             
             {showManualInput && (
               <div className="mt-3 space-y-2">
@@ -433,7 +433,8 @@ function WalletStep() {
                 </button>
               </div>
             )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -613,7 +614,7 @@ function AuthorizationStep() {
   )
 }
 
-function CompleteStep({ onComplete }: { onComplete: () => void }) {
+function CompleteStep() {
   return (
     <div className="text-center space-y-6">
       <div className="w-20 h-20 bg-gradient-to-r from-green-600 to-blue-600 rounded-full flex items-center justify-center mx-auto">
@@ -624,7 +625,7 @@ function CompleteStep({ onComplete }: { onComplete: () => void }) {
         <h3 className="text-2xl font-bold text-white">Setup Complete!</h3>
         <p className="text-slate-300 text-lg">
           Congratulations! Your XORJ vault is ready and your AI trading bot is authorized. 
-          You're now ready to start your intelligent Solana investing journey.
+          You&apos;re now ready to start your intelligent Solana investing journey.
         </p>
         
         <div className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 border border-purple-600/20 rounded-lg p-6">
@@ -636,7 +637,7 @@ function CompleteStep({ onComplete }: { onComplete: () => void }) {
             </li>
             <li className="flex items-center space-x-2">
               <div className="w-1.5 h-1.5 bg-blue-400 rounded-full"></div>
-              <span>You'll receive notifications about trades and performance updates</span>
+              <span>You&apos;ll receive notifications about trades and performance updates</span>
             </li>
             <li className="flex items-center space-x-2">
               <div className="w-1.5 h-1.5 bg-green-400 rounded-full"></div>

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { useEnhancedWallet } from '@/contexts/EnhancedWalletContext';
 import { Shield, Zap, TrendingUp, Lock, CheckCircle, ArrowRight, AlertCircle } from 'lucide-react';
@@ -9,7 +9,6 @@ import { WalletStatus } from '@/components/WalletStatus';
 import OnboardingTutorial from '@/components/OnboardingTutorial';
 import VaultManager from '@/components/VaultManager';
 import WalletDebug from '@/components/WalletDebug';
-import Link from 'next/link';
 
 const XORJLandingPage = () => {
   const [email, setEmail] = useState('');
@@ -25,36 +24,18 @@ const XORJLandingPage = () => {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showWalletStatus, setShowWalletStatus] = useState(false);
   const { connected, publicKey } = useWallet();
-  const enhancedWallet = useEnhancedWallet();
+  useEnhancedWallet();
 
-  const timeframes = [
+  const timeframes = useMemo(() => [
     { key: '24h', label: '24H', days: '1', interval: 'hourly' },
     { key: '7d', label: '7D', days: '7', interval: 'hourly' },
     { key: '30d', label: '1M', days: '30', interval: 'daily' },
     { key: '90d', label: '3M', days: '90', interval: 'daily' },
     { key: '365d', label: '1Y', days: '365', interval: 'daily' },
     { key: 'max', label: 'MAX', days: 'max', interval: 'daily' }
-  ];
+  ], []);
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      console.log('Analytics initialized');
-      trackEvent('page_view', { page: 'landing_page' });
-      
-      fetchHistoricalData(selectedTimeframe);
-      fetchCurrentPrice();
-      
-      const priceInterval = setInterval(fetchCurrentPrice, 30000);
-      
-      return () => clearInterval(priceInterval);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (selectedTimeframe) {
-      fetchHistoricalData(selectedTimeframe);
-    }
-  }, [selectedTimeframe]);
+  // Initial data fetching - moved after function definitions
 
   const trackEvent = (eventName: string, properties = {}) => {
     if (typeof window !== 'undefined') {
@@ -73,7 +54,7 @@ const XORJLandingPage = () => {
     trackEvent('chart_timeframe_change', { timeframe });
   };
 
-  const fetchHistoricalData = async (timeframeKey: string) => {
+  const fetchHistoricalData = useCallback(async (timeframeKey: string) => {
     try {
       const timeframe = timeframes.find(t => t.key === timeframeKey);
       if (!timeframe) return;
@@ -190,9 +171,16 @@ const XORJLandingPage = () => {
       
       setIsLoadingHistory(false);
     }
-  };
+  }, [timeframes]);
 
-  const fetchCurrentPrice = async () => {
+  // Initial data fetching useEffect - now after function definition
+  useEffect(() => {
+    if (selectedTimeframe) {
+      fetchHistoricalData(selectedTimeframe);
+    }
+  }, [selectedTimeframe, fetchHistoricalData]);
+
+  const fetchCurrentPrice = useCallback(async () => {
     try {
       const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd&include_24hr_change=true');
       const data = await response.json();
@@ -207,7 +195,22 @@ const XORJLandingPage = () => {
       setSolPrice(lastHistoricalPrice + variation);
       setPriceChange((Math.random() - 0.3) * 8);
     }
-  };
+  }, [priceHistory]);
+
+  // Initialize data fetching after functions are defined
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      console.log('Analytics initialized');
+      trackEvent('page_view', { page: 'landing_page' });
+      
+      fetchHistoricalData(selectedTimeframe);
+      fetchCurrentPrice();
+      
+      const priceInterval = setInterval(fetchCurrentPrice, 30000);
+      
+      return () => clearInterval(priceInterval);
+    }
+  }, [fetchCurrentPrice, fetchHistoricalData, selectedTimeframe]);
 
   const generateMiniChart = () => {
     if (priceHistory.length < 2) return null;

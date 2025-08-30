@@ -2,7 +2,9 @@
 
 ## Epic 3 Phase 1: Data Ingestion & Performance Calculation
 
-This document provides comprehensive documentation for the **Trader Intelligence & Scoring Engine** backend system implemented for Project XORJ. This is the core intellectual property that analyzes Solana wallets to identify top-performing traders.
+This document provides comprehensive documentation for the **Trader Intelligence & Scoring Engine** backend system implemented for Project XORJ. 
+
+⚠️ **CRITICAL SECURITY UPDATE v1.3.0**: All public APIs have been removed to protect intellectual property. The engine now operates as a secure internal service accessible only by the Trade Execution Bot.
 
 ---
 
@@ -395,7 +397,50 @@ Confidence scores (0-100) based on:
 
 ---
 
-## 🎯 Usage Examples
+## 🔒 Secure API Architecture (v1.3.0)
+
+### Security-First Design
+
+The Trader Intelligence Engine now operates as a **secure internal service** with strict access controls:
+
+1. **Single Secure Endpoint**: `/api/internal/trader-rankings` - Returns only essential data for bot execution
+2. **API Key Authentication**: Requires `INTERNAL_API_SECRET` environment variable 
+3. **User Agent Validation**: Only allows `XORJ-TradeBot/1.0` user agent
+4. **Origin Restrictions**: Limited to internal service origins
+5. **Minimal Data Exposure**: No detailed metrics, formulas, or algorithm details exposed
+
+### Secure Internal API Usage
+
+```bash
+# Only accessible by Trade Execution Bot with proper authentication
+curl -H "X-API-Key: ${INTERNAL_API_SECRET}" \
+     -H "User-Agent: XORJ-TradeBot/1.0" \
+     "http://localhost:3000/api/internal/trader-rankings?limit=20&minTier=B"
+```
+
+**Response (Secure - No IP Exposure):**
+```json
+{
+  "rankedTraders": [
+    {
+      "walletAddress": "DYw8jCTfwHNRJhhmFcbXvVDTqWMEVFBX6ZKUmG5CNSKK",
+      "trustScore": 78.45,
+      "tier": "A", 
+      "eligibleForCopy": true,
+      "confidenceLevel": 88,
+      "rank": 1
+    }
+  ],
+  "totalEligible": 156,
+  "generatedAt": 1692384000000,
+  "expires": 1692385800000,
+  "cacheValidFor": 1800
+}
+```
+
+## 🎯 Engine Usage (Internal Only)
+
+⚠️ **Note**: Direct engine access is for internal development only. Production systems must use the secure API.
 
 ### Basic Analysis
 
@@ -612,6 +657,52 @@ console.log(`Throughput: ${performanceResult.throughput} wallets/second`);
 
 ---
 
+---
+
+## 🔒 Security & IP Protection (v1.3.0)
+
+### Critical Architectural Changes
+
+**MAJOR SECURITY UPGRADE**: Fixed critical architectural flaw that exposed intellectual property through public APIs.
+
+#### What Was Fixed
+- **Removed Public APIs**: Deleted `/api/trader-intelligence/analyze`, `/api/trader-intelligence/batch`, and `/api/trader-intelligence/score` endpoints
+- **Eliminated IP Exposure**: No longer exposing detailed performance metrics, algorithm weights, or calculation formulas
+- **Secured Internal Communication**: Created single secure endpoint for Trade Execution Bot consumption only
+
+#### New Secure Architecture
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    SECURE XORJ ARCHITECTURE                    │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────┐    ┌──────────────────────────────────────┐ │
+│  │ Trader Intel    │    │        Secure Internal API          │ │
+│  │ Engine          │────│  /api/internal/trader-rankings      │ │
+│  │ (Internal Only) │    │                                      │ │
+│  └─────────────────┘    │  • API Key Authentication           │ │
+│                         │  • User Agent Validation            │ │
+│                         │  • Origin Restrictions              │ │
+│                         │  • Minimal Data Exposure            │ │
+│                         │  • No Algorithm Details             │ │
+│                         └──────────────────────────────────────┘ │
+│                                        │                         │
+│                                        ▼                         │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │              Trade Execution Bot                            │ │
+│  │         (ONLY Authorized Consumer)                         │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Security Controls Implemented
+1. **Authentication**: `INTERNAL_API_SECRET` required
+2. **Authorization**: Only `XORJ-TradeBot/1.0` user agent allowed  
+3. **Access Control**: Origin restrictions for internal services
+4. **Data Minimization**: Only essential ranking data exposed (no detailed metrics)
+5. **Error Security**: Generic error responses to prevent information leakage
+
+---
+
 ## 🏁 Conclusion
 
 The Trader Intelligence & Scoring Engine successfully implements **Task 3.1** from the PRD, providing:
@@ -623,12 +714,13 @@ The Trader Intelligence & Scoring Engine successfully implements **Task 3.1** fr
 ✅ **All required metrics**: Net ROI, Max Drawdown, Sharpe Ratio, Win/Loss Ratio, Total Trades  
 ✅ **Production-ready architecture** with error handling and validation  
 ✅ **Scalable concurrent design** supporting both single and batch analysis  
-✅ **Comprehensive documentation** with algorithmic and performance improvements detailed  
+✅ **SECURE INTERNAL API** protecting intellectual property from exposure  
+✅ **Comprehensive documentation** with security and performance improvements detailed  
 
-This system incorporates **critical algorithmic and performance fixes** that eliminate common financial calculation errors and processing bottlenecks, providing mathematically accurate trader analysis with dramatically improved processing speeds. The FIFO accounting, time-adjusted metrics, and parallel processing ensure precise and efficient identification of top-performing Solana traders.
+**CRITICAL v1.3.0 SECURITY UPDATE**: This system now incorporates **enterprise-grade security controls** that protect our core intellectual property while maintaining high-performance trader analysis capabilities. The secure internal API ensures that only authorized Trade Execution Bots can access essential ranking data without exposing sensitive algorithm details or calculation methodologies.
 
 ---
 
 *Last Updated: August 19, 2025*  
-*Version: 1.2.0 - Performance & Algorithmic Improvements*  
-*Status: Phase 1 Complete - High-Performance Production Ready*
+*Version: 1.3.0 - SECURITY & IP PROTECTION UPDATE*  
+*Status: Phase 1 Complete - Secure Production Ready*

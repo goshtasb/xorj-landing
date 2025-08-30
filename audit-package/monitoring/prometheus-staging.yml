@@ -1,0 +1,68 @@
+# Prometheus Configuration for XORJ V1 Staging Environment
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Rules and alerting
+rule_files:
+  - "alert-rules.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Next.js Application metrics
+  - job_name: 'nextjs-app'
+    static_configs:
+      - targets: ['nextjs-app:3000']
+    metrics_path: '/api/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    params:
+      format: ['prometheus']
+
+  # Quantitative Engine metrics
+  - job_name: 'quantitative-engine'
+    static_configs:
+      - targets: ['quantitative-engine:8001']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # Trade Execution Bot metrics
+  - job_name: 'trade-execution-bot'
+    static_configs:
+      - targets: ['trade-execution-bot:8002']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # PostgreSQL metrics (if postgres_exporter is available)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+    metrics_path: '/metrics'
+    scrape_interval: 60s
+    scrape_timeout: 10s
+
+  # Redis metrics (if redis_exporter is available)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+    metrics_path: '/metrics'
+    scrape_interval: 60s
+    scrape_timeout: 10s
+
+  # Health check endpoints
+  - job_name: 'health-checks'
+    static_configs:
+      - targets: 
+          - 'nextjs-app:3000'
+          - 'quantitative-engine:8001'
+          - 'trade-execution-bot:8002'
+    metrics_path: '/health'
+    scrape_interval: 30s
+    scrape_timeout: 5s

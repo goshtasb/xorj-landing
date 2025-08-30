@@ -80,7 +80,7 @@ export function PerformanceChart({
   };
 
   // Custom tooltip formatter
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ color: string; name: string; value: number }>; label?: string }) => {
     if (active && payload && payload.length) {
       const date = new Date(label).toLocaleDateString('en-US', {
         month: 'short',
@@ -91,7 +91,7 @@ export function PerformanceChart({
       return (
         <div className="bg-gray-900 border border-white/20 rounded-lg p-3 shadow-lg">
           <p className="text-gray-300 text-sm mb-2">{date}</p>
-          {payload.map((entry: any, index: number) => (
+          {payload.map((entry: { color: string; name: string; value: number }, index: number) => (
             <div key={index} className="flex items-center gap-2">
               <div 
                 className="w-3 h-3 rounded-full" 

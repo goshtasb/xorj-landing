@@ -69,14 +69,14 @@ export default function EnhancedPhantomAuth() {
       console.log('✅ Phantom authentication successful:', response);
       setPhantomStatus('connected');
       
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ Phantom authentication failed:', error);
       setPhantomStatus('error');
       
       // Parse different types of errors
-      if (error.code === 4001) {
+      if ((error as { code?: number })?.code === 4001) {
         setErrorMessage('User rejected the connection request');
-      } else if (error.code === -32002) {
+      } else if ((error as { code?: number })?.code === -32002) {
         setErrorMessage('Connection request already pending. Check Phantom wallet');
       } else if (error.message?.includes('install')) {
         setErrorMessage('Please install Phantom wallet extension');
@@ -99,7 +99,7 @@ export default function EnhancedPhantomAuth() {
       setPhantomStatus('found');
       console.log('👋 Disconnected from Phantom wallet');
       
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error disconnecting:', error);
     }
   };
@@ -293,11 +293,11 @@ export default function EnhancedPhantomAuth() {
           <div className="p-4 pt-0 text-sm text-gray-600 space-y-3">
             <div className="bg-white p-3 rounded-lg">
               <p className="font-medium text-gray-800 mb-1">🔗 Connection Process:</p>
-              <p>This triggers Phantom's full authentication modal with all available options including email, Google, Apple sign-in, seed phrase import, and new wallet creation.</p>
+              <p>This triggers Phantom&apos;s full authentication modal with all available options including email, Google, Apple sign-in, seed phrase import, and new wallet creation.</p>
             </div>
             <div className="bg-white p-3 rounded-lg">
               <p className="font-medium text-gray-800 mb-1">🛡️ Security:</p>
-              <p>All authentication happens through Phantom's secure infrastructure. Your credentials are never exposed to this application.</p>
+              <p>All authentication happens through Phantom&apos;s secure infrastructure. Your credentials are never exposed to this application.</p>
             </div>
             <div className="bg-white p-3 rounded-lg">
               <p className="font-medium text-gray-800 mb-1">🔧 Troubleshooting:</p>

@@ -1,19 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { botService, checkBotServiceHealth, isBotServiceError } from '@/lib/botService';
+
+const FASTAPI_GATEWAY_URL = process.env.NEXT_PUBLIC_FASTAPI_GATEWAY_URL || 'http://localhost:8000';
 
 /**
  * Bot Emergency Controls API - Kill switch and emergency actions
  * POST /api/bot/emergency
+ * UNIFIED AUTHENTICATION: Proxy to FastAPI gateway with session token
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { user_id, action, reason, authorization_key } = body;
+    const { action, reason, authorization_key } = body;
 
-    if (!user_id || !action) {
+    if (!action) {
       return NextResponse.json(
-        { error: 'user_id and action are required' },
+        { error: 'action is required' },
         { status: 400 }
+      );
+    }
+
+    // Get Authorization header from client request
+    const authorization = request.headers.get('authorization');
+    
+    if (!authorization || !authorization.startsWith('Bearer ')) {
+      return NextResponse.json(
+        { error: 'Missing or invalid authorization header' },
+        { status: 401 }
       );
     }
 
@@ -25,26 +37,50 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if bot service is available
-    const isServiceAvailable = await checkBotServiceHealth();
-    
-    if (isServiceAvailable) {
-      try {
-        // Execute emergency action via bot service
-        const emergencyAction = { user_id, action, reason, authorization_key };
-        const result = await botService.executeEmergencyAction(emergencyAction);
-        return NextResponse.json(result);
-      } catch (error) {
-        console.error('Failed to execute emergency action via bot service:', error);
-        
-        if (isBotServiceError(error) && error.status) {
-          return NextResponse.json(
-            { error: error.message },
-            { status: error.status }
-          );
-        }
-        
-        // Fall through to mock response if service fails
+    console.log('🔄 Proxying bot emergency action to FastAPI gateway');
+
+    try {
+      // Proxy request to FastAPI gateway with authentication
+      const response = await fetch(`${FASTAPI_GATEWAY_URL}/bot/emergency`, {
+        method: 'POST',
+        headers: {
+          'Authorization': authorization,
+          'Content-Type': 'application/json',
+          'X-Request-ID': `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        },
+        body: JSON.stringify({ action, reason, authorization_key }),
+        // 10 second timeout
+        signal: AbortSignal.timeout(10000)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`FastAPI gateway error: ${response.status} ${errorText}`);
+        return NextResponse.json(
+          { error: `Gateway error: ${response.status} ${response.statusText}` },
+          { status: response.status }
+        );
+      }
+
+      const result = await response.json();
+      console.log('✅ Bot emergency action executed via FastAPI gateway');
+      return NextResponse.json(result);
+      
+    } catch {
+      console.error('Failed to execute emergency action via FastAPI gateway:');
+      
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        return NextResponse.json(
+          { error: 'Gateway request timed out' },
+          { status: 504 }
+        );
+      }
+      
+      if (error instanceof Error && error.message.includes('fetch')) {
+        // Fall through to mock response when gateway is unavailable
+        console.log('🔄 FastAPI gateway unavailable, using mock response');
+      } else {
+        throw error;
       }
     }
 
@@ -58,7 +94,7 @@ export async function POST(request: NextRequest) {
         const killSwitchResponse = {
           action: 'kill_switch',
           status: 'activated',
-          user_id,
+          user_id: 'authenticated_user',  // User ID comes from session token
           reason: reason || 'user_requested',
           timestamp,
           authorization_key: authorization_key.substring(0, 8) + '...',
@@ -69,7 +105,7 @@ export async function POST(request: NextRequest) {
 
         // Log the emergency action
         console.log('EMERGENCY: Kill switch activated', {
-          user_id,
+          user_id: 'authenticated_user',
           reason,
           timestamp,
           authorization_key: authorization_key.substring(0, 8) + '...'
@@ -86,7 +122,7 @@ export async function POST(request: NextRequest) {
         const pauseResponse = {
           action: 'pause',
           status: 'paused',
-          user_id,
+          user_id: 'authenticated_user',  // User ID comes from session token
           reason: reason || 'user_requested',
           timestamp,
           bot_status: 'paused',
@@ -105,7 +141,7 @@ export async function POST(request: NextRequest) {
         const resumeResponse = {
           action: 'resume',
           status: 'resumed',
-          user_id,
+          user_id: 'authenticated_user',  // User ID comes from session token
           timestamp,
           bot_status: 'active',
           message: 'Bot resumed successfully. Trading operations are now active.',
@@ -129,8 +165,8 @@ export async function POST(request: NextRequest) {
         );
     }
 
-  } catch (error) {
-    console.error('Bot emergency API error:', error);
+  } catch {
+    console.error('Bot emergency API error:');
     return NextResponse.json(
       { error: 'Failed to process emergency action' },
       { status: 500 }
@@ -140,46 +176,71 @@ export async function POST(request: NextRequest) {
 
 /**
  * Get Emergency Status
- * GET /api/bot/emergency?user_id={user_id}
+ * GET /api/bot/emergency
+ * UNIFIED AUTHENTICATION: Proxy to FastAPI gateway with session token
  */
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('user_id');
+    // Get Authorization header from client request
+    const authorization = request.headers.get('authorization');
     
-    if (!userId) {
+    if (!authorization || !authorization.startsWith('Bearer ')) {
       return NextResponse.json(
-        { error: 'user_id parameter is required' },
-        { status: 400 }
+        { error: 'Missing or invalid authorization header' },
+        { status: 401 }
       );
     }
 
-    // Check if bot service is available
-    const isServiceAvailable = await checkBotServiceHealth();
-    
-    if (isServiceAvailable) {
-      try {
-        // Get actual emergency status from bot service
-        const emergencyStatus = await botService.getEmergencyStatus(userId);
-        return NextResponse.json(emergencyStatus);
-      } catch (error) {
-        console.error('Failed to fetch emergency status from bot service:', error);
-        
-        if (isBotServiceError(error) && error.status) {
-          return NextResponse.json(
-            { error: error.message },
-            { status: error.status }
-          );
-        }
-        
-        // Fall through to mock data if service fails
+    console.log('🔄 Proxying emergency status request to FastAPI gateway');
+
+    try {
+      // Proxy request to FastAPI gateway with authentication
+      const response = await fetch(`${FASTAPI_GATEWAY_URL}/bot/emergency`, {
+        method: 'GET',
+        headers: {
+          'Authorization': authorization,
+          'Content-Type': 'application/json',
+          'X-Request-ID': `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        },
+        // 10 second timeout
+        signal: AbortSignal.timeout(10000)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`FastAPI gateway error: ${response.status} ${errorText}`);
+        return NextResponse.json(
+          { error: `Gateway error: ${response.status} ${response.statusText}` },
+          { status: response.status }
+        );
+      }
+
+      const emergencyStatus = await response.json();
+      console.log('✅ Emergency status fetched from FastAPI gateway');
+      return NextResponse.json(emergencyStatus);
+      
+    } catch {
+      console.error('Failed to fetch emergency status from FastAPI gateway:');
+      
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        return NextResponse.json(
+          { error: 'Gateway request timed out' },
+          { status: 504 }
+        );
+      }
+      
+      if (error instanceof Error && error.message.includes('fetch')) {
+        // Fall through to mock data when gateway is unavailable
+        console.log('🔄 FastAPI gateway unavailable, using mock data');
+      } else {
+        throw error;
       }
     }
 
     // Fallback mock emergency status when bot service is unavailable
     console.log('🔄 Using mock emergency status - Bot service unavailable');
     const emergencyStatus = {
-      user_id: userId,
+      user_id: 'authenticated_user',  // User ID comes from session token
       kill_switch_active: false,
       bot_status: 'active',
       circuit_breakers_status: {
@@ -205,8 +266,8 @@ export async function GET(request: NextRequest) {
       _service_status: 'unavailable'
     });
 
-  } catch (error) {
-    console.error('Bot emergency status API error:', error);
+  } catch {
+    console.error('Bot emergency status API error:');
     return NextResponse.json(
       { error: 'Failed to fetch emergency status' },
       { status: 500 }

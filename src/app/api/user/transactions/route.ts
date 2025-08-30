@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PublicKey } from '@solana/web3.js';
 import { v4 as uuidv4 } from 'uuid';
+import { TradeService } from '@/lib/botStateService';
 
 // FIX (NFR-1): Mark the route handler as dynamic to prevent static rendering and ensure
 // it runs on the server for every request, respecting cache-control headers.
@@ -60,40 +61,218 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Invalid wallet address format' }, { status: 400 });
     }
 
-    let allTransactions = await fetchRealTransactions(walletAddress);
+    // PHASE 1: Use read-through caching for transactions
+    const { cacheLayer } = await import('@/lib/cacheLayer');
+    const cachedResult = await cacheLayer.getUserTransactions(walletAddress, page, limit);
+    
+    if (cachedResult.success && cachedResult.data) {
+      console.log(`🎯 Serving cached transactions for ${walletAddress} (fromCache: ${cachedResult.fromCache})`);
+      const responseData = cachedResult.data as PaginatedTransactions;
+      
+      // If we got empty results from cache/database, try fallback
+      if (responseData.totalCount === 0) {
+        // Try real transactions API as fallback
+        const realTransactions = await fetchRealTransactions(walletAddress);
+        if (realTransactions !== null && realTransactions.length > 0) {
+          const totalCount = realTransactions.length;
+          const pageCount = Math.ceil(totalCount / limit);
+          const offset = (page - 1) * limit;
+          const paginatedTransactions = realTransactions.slice(offset, offset + limit);
+          
+          const fallbackData: PaginatedTransactions = {
+            transactions: paginatedTransactions,
+            totalCount,
+            pageCount,
+            currentPage: page,
+          };
+          
+          // Update cache with fallback data
+          await cacheLayer.invalidateUserCache(walletAddress, `transactions:${page}:${limit}`);
+          
+          const processingTime = Date.now() - startTime;
+          return NextResponse.json({ success: true, data: fallbackData, requestId }, {
+            headers: {
+              'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
+              'X-Processing-Time': `${processingTime}ms`,
+              'X-Request-ID': requestId,
+              'X-Cache-Status': 'FALLBACK'
+            },
+          });
+        }
+        
+        // Return empty data instead of mock transactions
+        const responseData: PaginatedTransactions = {
+          transactions: [],
+          totalCount: 0,
+          pageCount: 0,
+          currentPage: page,
+        };
+        
+        const processingTime = Date.now() - startTime;
+        return NextResponse.json({ success: true, data: responseData, requestId }, {
+          headers: {
+            'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
+            'X-Processing-Time': `${processingTime}ms`,
+            'X-Request-ID': requestId,
+            'X-Cache-Status': 'EMPTY'
+          },
+        });
+      }
+      
+      
+      const processingTime = Date.now() - startTime;
+      return NextResponse.json({ success: true, data: responseData, requestId }, {
+        headers: {
+          // NFR-1: Ensure browsers and CDNs do not cache this dynamic response.
+          'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
+          'X-Processing-Time': `${processingTime}ms`,
+          'X-Request-ID': requestId,
+          'X-Cache-Status': cachedResult.fromCache ? 'HIT' : 'MISS'
+        },
+      });
+    } else {
+      // Cache layer failed - fallback to original logic
+      console.error(`❌ Cache layer failed for ${walletAddress}:`, cachedResult.error);
+      
+      // Original fallback logic
+      let allTransactions = await fetchDatabaseTransactions(walletAddress);
+      
+      if (allTransactions.length === 0) {
+        const realTransactions = await fetchRealTransactions(walletAddress);
+        if (realTransactions !== null && realTransactions.length > 0) {
+          allTransactions = realTransactions;
+        }
+      }
 
-    // Fallback to mock data only if the real service fails
-    if (allTransactions === null) {
-      allTransactions = generateMockTransactions(walletAddress);
+      // Return empty data when no real transactions exist
+      if (allTransactions.length === 0) {
+        allTransactions = [];
+      }
+
+      const totalCount = allTransactions.length;
+      const pageCount = Math.ceil(totalCount / limit);
+      const offset = (page - 1) * limit;
+      const paginatedTransactions = allTransactions.slice(offset, offset + limit);
+
+      const responseData: PaginatedTransactions = {
+        transactions: paginatedTransactions,
+        totalCount,
+        pageCount,
+        currentPage: page,
+      };
+      
+      const processingTime = Date.now() - startTime;
+      return NextResponse.json({ success: true, data: responseData, requestId }, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
+          'X-Processing-Time': `${processingTime}ms`,
+          'X-Request-ID': requestId,
+          'X-Cache-Status': 'ERROR'
+        },
+      });
     }
 
-    const totalCount = allTransactions.length;
-    const pageCount = Math.ceil(totalCount / limit);
-    const offset = (page - 1) * limit;
-    const paginatedTransactions = allTransactions.slice(offset, offset + limit);
-
-    const responseData: PaginatedTransactions = {
-      transactions: paginatedTransactions,
-      totalCount,
-      pageCount,
-      currentPage: page,
-    };
-
-    return NextResponse.json({ success: true, data: responseData, requestId }, {
-      headers: {
-        // NFR-1: Ensure browsers and CDNs do not cache this dynamic response.
-        'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
-        'X-Request-ID': requestId,
-      },
-    });
-
-  } catch (error) {
-    console.error(`[${requestId}] Transactions API Error:`, error);
+  } catch {
+    console.error(`[${requestId}] Transactions API Error:`);
     return NextResponse.json({ success: false, error: 'An internal error occurred.' }, { status: 500 });
   }
 }
 
 // --- Data Fetching & Transformation ---
+
+/**
+ * Fetches transaction data from our database (trades table)
+ * Returns an array of transactions from the database
+ */
+async function fetchDatabaseTransactions(walletAddress: string): Promise<Transaction[]> {
+  try {
+    console.log(`📦 Fetching transactions from database for wallet: ${walletAddress}`);
+    
+    // Get trades from database for this user's vault address
+    // Note: In a real system, we'd need to map wallet address to vault address
+    const tradesResult = await TradeService.getAll({
+      user_vault_address: walletAddress, // Using wallet as vault address for now
+      limit: 1000, // Get all trades for this user
+      orderBy: 'created_at',
+      orderDirection: 'DESC'
+    });
+    
+    if (!tradesResult.success || !tradesResult.data) {
+      console.log(`⚠️ No trades found in database for wallet: ${walletAddress}`);
+      return [];
+    }
+    
+    const dbTrades = tradesResult.data;
+    console.log(`✅ Found ${dbTrades.length} trades in database`);
+    
+    // Transform database trades into Transaction format
+    return dbTrades.map((trade): Transaction => ({
+      id: trade.id,
+      walletAddress,
+      timestamp: trade.created_at.getTime(),
+      type: determineTransactionType(trade.from_token_address, trade.to_token_address),
+      status: mapTradeStatus(trade.status),
+      symbol: getTokenSymbol(trade.from_token_address),
+      amount: Number(trade.amount_in) / 1e6, // Convert from lamports/smallest units
+      price: calculateTradePrice(trade),
+      totalValue: Number(trade.amount_in) * calculateTradePrice(trade) / 1e6,
+      fees: Number(trade.gas_fee || 0) / 1e9, // Convert lamports to SOL
+      txHash: trade.transaction_signature || undefined
+    }));
+    
+  } catch {
+    console.error(`❌ Error fetching database transactions for ${walletAddress}:`);
+    return [];
+  }
+}
+
+/**
+ * Helper functions for database transaction transformation
+ */
+function determineTransactionType(fromToken: string, toToken: string): TransactionType {
+  // If from token is USDC and to token is something else, it's a BUY
+  // If from token is something else and to token is USDC, it's a SELL
+  const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+  
+  if (fromToken === USDC_MINT) return 'BUY';
+  if (toToken === USDC_MINT) return 'SELL';
+  
+  // Default to BUY if we can't determine
+  return 'BUY';
+}
+
+function mapTradeStatus(dbStatus: string): TransactionStatus {
+  switch (dbStatus.toLowerCase()) {
+    case 'confirmed': return 'COMPLETED';
+    case 'pending': return 'PENDING';
+    case 'submitted': return 'PENDING';
+    case 'failed': return 'FAILED';
+    default: return 'PENDING';
+  }
+}
+
+function getTokenSymbol(tokenAddress: string): string {
+  const tokenMap: Record<string, string> = {
+    'So11111111111111111111111111111111111111112': 'SOL',
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 'USDC',
+    'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN': 'JUP',
+    '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R': 'RAY',
+    // Add more token mappings as needed
+  };
+  
+  return tokenMap[tokenAddress] || tokenAddress.slice(0, 6) + '...';
+}
+
+function calculateTradePrice(trade: Record<string, unknown>): number {
+  const amountIn = Number(trade.amount_in);
+  const expectedOut = Number(trade.expected_amount_out);
+  const actualOut = Number(trade.actual_amount_out || expectedOut);
+  
+  if (amountIn === 0) return 0;
+  
+  // Calculate price as output/input ratio
+  return actualOut / amountIn;
+}
 
 /**
  * Fetches real transaction data from the backend bot service.
@@ -119,7 +298,7 @@ async function fetchRealTransactions(walletAddress: string): Promise<Transaction
     }
 
     // Transform raw trade data into the standardized Transaction format.
-    return data.trades.map((trade: any): Transaction => ({
+    return data.trades.map((trade: Record<string, unknown>): Transaction => ({
       id: trade.trade_id || uuidv4(),
       walletAddress,
       timestamp: new Date(trade.timestamp).getTime(),
@@ -134,41 +313,9 @@ async function fetchRealTransactions(walletAddress: string): Promise<Transaction
       txHash: trade.transaction_signature,
     }));
 
-  } catch (error) {
-    console.error(`Bot trades API connection failed for ${walletAddress}:`, error);
+  } catch {
+    console.error(`Bot trades API connection failed for ${walletAddress}:`);
     return null; // Indicates a failure to connect to the service.
   }
 }
 
-/**
- * Generates consistent, deterministic mock transactions for a given wallet address.
- * This is used as a fallback if the primary data service is unavailable.
- */
-function generateMockTransactions(walletAddress: string): Transaction[] {
-  const transactions: Transaction[] = [];
-  const symbols = ['SOL', 'USDC', 'JUP', 'WIF'];
-  let seed = walletAddress.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const pseudoRandom = () => {
-    seed = (seed * 9301 + 49297) % 233280;
-    return seed / 233280;
-  };
-
-  for (let i = 0; i < 50; i++) {
-    const amount = pseudoRandom() * 10;
-    const price = 10 + pseudoRandom() * 190;
-    transactions.push({
-      id: `mock_${i}_${seed}`,
-      walletAddress,
-      timestamp: Date.now() - Math.floor(pseudoRandom() * 30 * 24 * 60 * 60 * 1000),
-      type: pseudoRandom() > 0.5 ? 'BUY' : 'SELL',
-      status: 'COMPLETED',
-      symbol: symbols[Math.floor(pseudoRandom() * symbols.length)],
-      amount,
-      price,
-      totalValue: amount * price,
-      fees: amount * price * 0.001,
-      txHash: `mock_tx_${Math.floor(pseudoRandom() * 1e9).toString(16)}`,
-    });
-  }
-  return transactions.sort((a, b) => b.timestamp - a.timestamp);
-}

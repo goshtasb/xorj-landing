@@ -1,0 +1,38 @@
+{
+  "name": "xorj-chaos-testing",
+  "version": "1.0.0",
+  "description": "XORJ Chaos Engineering Test Framework",
+  "main": "chaos-controller.js",
+  "scripts": {
+    "start": "node chaos-controller.js",
+    "test": "node run-chaos-tests.js",
+    "rpc-failure": "node tests/rpc-failure-test.js",
+    "db-failure": "node tests/db-failure-test.js",
+    "onchain-failure": "node tests/onchain-failure-test.js",
+    "full-chaos": "node tests/full-chaos-suite.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "pg": "^8.11.0",
+    "express": "^4.18.0",
+    "ws": "^8.14.0",
+    "@solana/web3.js": "^1.87.6",
+    "toxiproxy-node-client": "^2.0.6",
+    "winston": "^3.11.0",
+    "dotenv": "^16.3.0",
+    "node-cron": "^3.0.3",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "keywords": [
+    "chaos",
+    "testing",
+    "solana",
+    "resilience",
+    "production"
+  ],
+  "author": "XORJ Development Team",
+  "license": "MIT"
+}

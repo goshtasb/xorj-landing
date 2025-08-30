@@ -43,8 +43,12 @@ export function ConfirmationModal({ isOpen, onClose }: ConfirmationModalProps) {
       console.log('🚀 Starting bot deactivation for:', publicKey.toString());
 
       // TODO: Build actual revocation transaction
-      // For now, we'll simulate the transaction process
-      await simulateRevocationTransaction();
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('Transaction functionality not yet implemented for production');
+      } else {
+        // For development, simulate the transaction process
+        await simulateRevocationTransaction();
+      }
 
       setTxStatus('confirmed');
       

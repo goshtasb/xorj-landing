@@ -57,7 +57,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin  # Change in production
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-secure_dev_password}  # Use environment variable
       - GF_INSTALL_PLUGINS=grafana-piechart-panel
     volumes:
       - grafana_data:/var/lib/grafana
@@ -110,7 +110,7 @@ services:
     image: prometheuscommunity/postgres-exporter:v0.11.1
     container_name: postgres-exporter
     environment:
-      - DATA_SOURCE_NAME=postgresql://postgres:password@postgres:5432/postgres?sslmode=disable
+      - DATA_SOURCE_NAME=postgresql://postgres:${POSTGRES_PASSWORD:-secure_dev_password}@postgres:5432/postgres?sslmode=disable
     ports:
       - "9187:9187"
     networks:
@@ -171,7 +171,7 @@ services:
     environment:
       POSTGRES_DB: xorj_quantitative
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password  # Use secrets in production
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_dev_password}  # Use environment variable
     ports:
       - "5432:5432"
     volumes:

@@ -26,10 +26,10 @@ logger = get_calculation_logger()
 # --- XORJ Trust Score Algorithm ---
 # Core IP: Implement exactly as specified in FR-3
 
-# Weights are biased towards safety and risk-adjusted returns
+# Weights are biased towards safety and risk-adjusted returns (V1 Safety-First Tuning)
 SHARPE_WEIGHT = Decimal('0.40')
-ROI_WEIGHT = Decimal('0.25')
-DRAWDOWN_PENALTY_WEIGHT = Decimal('0.35')
+ROI_WEIGHT = Decimal('0.15')
+DRAWDOWN_PENALTY_WEIGHT = Decimal('0.45')
 
 # Eligibility criteria constants
 MIN_TRADING_DAYS = 90

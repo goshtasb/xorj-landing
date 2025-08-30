@@ -15,6 +15,7 @@ interface MetricCardProps {
   trend?: 'positive' | 'negative' | 'neutral';
   subtitle?: string;
   loading?: boolean;
+  error?: boolean;
   className?: string;
 }
 
@@ -25,6 +26,7 @@ export function MetricCard({
   trend = 'neutral',
   subtitle,
   loading = false,
+  error = false,
   className = ''
 }: MetricCardProps) {
   
@@ -93,6 +95,7 @@ export function MetricCard({
 
   const formatValue = (val: string | number) => {
     if (loading) return '---';
+    if (error) return '--';  // Display "--" for API errors (Test Case 2.1.1)
     
     if (typeof val === 'number') {
       // Format numbers with appropriate precision
@@ -127,6 +130,8 @@ export function MetricCard({
         <div className={`text-2xl font-bold ${getValueColor()}`}>
           {loading ? (
             <div className="h-8 w-24 bg-gray-600 rounded animate-pulse" />
+          ) : error ? (
+            <span className="text-gray-400">--</span>
           ) : (
             formatValue(value)
           )}

@@ -11,7 +11,7 @@ export interface PhantomProvider {
   publicKey: PublicKey | null;
   on: (event: string, callback: (publicKey: PublicKey | null) => void) => void;
   off: (event: string, callback: (publicKey: PublicKey | null) => void) => void;
-  request: (method: string, params?: any) => Promise<any>;
+  request: (method: string, params?: unknown) => Promise<unknown>;
 }
 
 export interface PhantomWindow extends Window {

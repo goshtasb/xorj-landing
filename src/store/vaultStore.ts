@@ -92,7 +92,7 @@ export interface VaultState {
  * Provides reactive state updates for UI components and maintains
  * transaction history for user feedback.
  */
-export const useVaultStore = create<VaultState>((set, get) => ({
+export const useVaultStore = create<VaultState>((set /* _get */) => ({
   // Initial state
   status: VaultStatus.NotCreated,
   vaultAddress: null,

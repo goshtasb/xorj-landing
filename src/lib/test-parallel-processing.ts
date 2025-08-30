@@ -29,11 +29,11 @@ export async function testParallelProcessing() {
 
   try {
     console.log(`🚀 Starting batch analysis of ${TEST_WALLETS.length} wallets...`);
-    const startTime = Date.now();
+    const _startTime = Date.now();
     
     const result = await traderIntelligenceEngine.analyzeBatch(batchRequest);
     
-    const totalTime = Date.now() - startTime;
+    const totalTime = Date.now() - _startTime;
     
     console.log('\n📊 Performance Results:');
     console.log(`==============================`);
@@ -75,11 +75,11 @@ export async function testParallelProcessing() {
       results: result
     };
 
-  } catch (error) {
-    console.error('❌ Test failed:', error);
+  } catch {
+    console.error('❌ Test failed:');
     return {
       success: false,
-      error: error instanceof Error ? error.message : String(error)
+      error: 'Unknown error'
     };
   }
 }

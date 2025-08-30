@@ -3,6 +3,10 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import AppWalletProvider from "@/components/AppWalletProvider";
 import { EnhancedWalletProvider } from "@/contexts/EnhancedWalletContext";
+import { SimpleWalletProvider } from "@/contexts/SimpleWalletContext";
+import { GlobalErrorProvider } from "@/contexts/GlobalErrorContext";
+import { BotStatusProvider } from "@/contexts/BotStatusContext";
+import GlobalErrorBanner from "@/components/GlobalErrorBanner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,11 +33,18 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <AppWalletProvider>
-          <EnhancedWalletProvider>
-            {children}
-          </EnhancedWalletProvider>
-        </AppWalletProvider>
+        <GlobalErrorProvider>
+          <GlobalErrorBanner />
+          <AppWalletProvider>
+            <EnhancedWalletProvider>
+              <SimpleWalletProvider>
+                <BotStatusProvider>
+                  {children}
+                </BotStatusProvider>
+              </SimpleWalletProvider>
+            </EnhancedWalletProvider>
+          </AppWalletProvider>
+        </GlobalErrorProvider>
       </body>
     </html>
   );

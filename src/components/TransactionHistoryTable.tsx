@@ -5,7 +5,7 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { 
   ArrowUpRight, 
@@ -17,9 +17,10 @@ import {
   AlertCircle, 
   ChevronLeft, 
   ChevronRight,
-  ExternalLink,
   Copy,
-  Loader2
+  RefreshCw,
+  Pause,
+  Play
 } from 'lucide-react';
 
 export type TransactionType = 'BUY' | 'SELL' | 'DEPOSIT' | 'WITHDRAWAL';
@@ -64,6 +65,8 @@ export function TransactionHistoryTable({ className = '' }: TransactionHistoryTa
   const [error, setError] = useState<string | null>(null);
   const [copiedTxHash, setCopiedTxHash] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
+  const [pollingEnabled, setPollingEnabled] = useState(true);
 
   // Ensure component is mounted before accessing wallet
   useEffect(() => {
@@ -74,14 +77,18 @@ export function TransactionHistoryTable({ className = '' }: TransactionHistoryTa
   const effectivePublicKey = mounted ? publicKey?.toString() : undefined;
 
   // Fetch transactions data
-  const fetchTransactions = async (page: number) => {
+  const fetchTransactions = useCallback(async (page: number, silent = false) => {
     if (!mounted || !effectivePublicKey) return;
 
-    setLoading(true);
-    setError(null);
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
 
     try {
-      console.log(`📄 Fetching transactions for page ${page}...`);
+      if (!silent) {
+        console.log(`📄 Fetching transactions for page ${page}...`);
+      }
       
       const response = await fetch(
         `/api/user/transactions?walletAddress=${effectivePublicKey}&page=${page}&limit=10`
@@ -98,22 +105,49 @@ export function TransactionHistoryTable({ className = '' }: TransactionHistoryTa
       }
 
       setData(result.data);
-      console.log(`✅ Loaded ${result.data.transactions.length} transactions`);
+      setLastUpdateTime(new Date());
+      
+      if (!silent) {
+        console.log(`✅ Loaded ${result.data.transactions.length} transactions`);
+      } else {
+        console.log(`🔄 Auto-refreshed: ${result.data.transactions.length} transactions`);
+      }
 
     } catch (err) {
-      console.error('❌ Transaction fetch failed:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load transactions');
+      if (!silent) {
+        console.error('❌ Transaction fetch failed:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load transactions');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
-  };
+  }, [mounted, effectivePublicKey]);
 
   // Initial data fetch
   useEffect(() => {
     if (mounted) {
       fetchTransactions(currentPage);
     }
-  }, [currentPage, mounted, effectivePublicKey]);
+  }, [currentPage, mounted, effectivePublicKey, fetchTransactions]);
+
+  // Live polling for transaction updates
+  useEffect(() => {
+    if (!mounted || !effectivePublicKey || !pollingEnabled) return;
+
+    console.log('🔄 Starting live transaction polling...');
+    
+    const interval = setInterval(() => {
+      // Only poll the current page silently
+      fetchTransactions(currentPage, true);
+    }, 3000); // Poll every 3 seconds
+
+    return () => {
+      console.log('⏹️ Stopping live transaction polling');
+      clearInterval(interval);
+    };
+  }, [mounted, effectivePublicKey, currentPage, pollingEnabled, fetchTransactions]);
 
   // Handle page navigation
   const handlePageChange = (newPage: number) => {
@@ -276,10 +310,7 @@ export function TransactionHistoryTable({ className = '' }: TransactionHistoryTa
       <div className={`bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl p-6 ${className}`}>
         <h2 className="text-xl font-semibold text-white mb-6">Transaction History</h2>
         <div className="text-center py-12">
-          <div className="text-gray-400 text-lg mb-2">No Transactions Yet</div>
-          <div className="text-gray-500 text-sm">
-            Your trading activity will appear here once you start using the bot
-          </div>
+          <div className="text-gray-400 text-lg">No History</div>
         </div>
       </div>
     );
@@ -291,9 +322,52 @@ export function TransactionHistoryTable({ className = '' }: TransactionHistoryTa
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-xl font-semibold text-white">Transaction History</h2>
-          <p className="text-gray-400 text-sm mt-1">
-            {data.totalCount} total transactions
-          </p>
+          <div className="flex items-center gap-4 mt-1">
+            <p className="text-gray-400 text-sm">
+              {data.totalCount} total transactions
+            </p>
+            {lastUpdateTime && (
+              <p className="text-gray-500 text-xs">
+                Updated {lastUpdateTime.toLocaleTimeString()}
+              </p>
+            )}
+          </div>
+        </div>
+        
+        {/* Live Polling Controls */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            {pollingEnabled && (
+              <div className="flex items-center gap-1 text-green-400 text-xs">
+                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                Live
+              </div>
+            )}
+            <button
+              onClick={() => setPollingEnabled(!pollingEnabled)}
+              className={`p-2 rounded-lg transition-colors ${
+                pollingEnabled 
+                  ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30' 
+                  : 'bg-gray-500/20 text-gray-400 hover:bg-gray-500/30'
+              }`}
+              title={pollingEnabled ? 'Pause live updates' : 'Enable live updates'}
+            >
+              {pollingEnabled ? (
+                <Pause className="h-4 w-4" />
+              ) : (
+                <Play className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+          
+          <button
+            onClick={() => fetchTransactions(currentPage)}
+            disabled={loading}
+            className="p-2 bg-white/10 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+            title="Refresh now"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
         </div>
       </div>
 
@@ -357,19 +431,19 @@ export function TransactionHistoryTable({ className = '' }: TransactionHistoryTa
 
                   {/* Amount */}
                   <td className="py-4 px-2">
-                    <span className="text-white">{tx.amount.toLocaleString()}</span>
+                    <span className="text-white">{(tx.amount || 0).toLocaleString()}</span>
                   </td>
 
                   {/* Price */}
                   <td className="py-4 px-2">
-                    <span className="text-gray-300">{formatCurrency(tx.price)}</span>
+                    <span className="text-gray-300">{formatCurrency(tx.price || 0)}</span>
                   </td>
 
                   {/* Total Value */}
                   <td className="py-4 px-2">
                     <div>
-                      <span className="text-white font-medium">{formatCurrency(tx.totalValue)}</span>
-                      <div className="text-gray-500 text-xs">Fee: {formatCurrency(tx.fees)}</div>
+                      <span className="text-white font-medium">{formatCurrency(tx.totalValue || 0)}</span>
+                      <div className="text-gray-500 text-xs">Fee: {formatCurrency(tx.fees || 0)}</div>
                     </div>
                   </td>
 

@@ -203,7 +203,7 @@ export class XORJTrustScoreCalculator {
     // Calculate daily ROI percentages
     let maxDailyROI = 0;
     
-    for (const [day, data] of dailyPnL) {
+    for (const [/* _day */, data] of dailyPnL) {
       if (data.investment > 0) {
         const dailyROI = Math.abs((data.pnl / data.investment) * 100);
         maxDailyROI = Math.max(maxDailyROI, dailyROI);

@@ -1,12 +1,12 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Connection, clusterApiUrl } from '@solana/web3.js'
 import { useSimpleWallet } from '@/contexts/SimpleWalletContext'
 import { useVaultStore, TransactionStatus } from '@/store/vaultStore'
 import { 
   X, AlertCircle, Check, Loader2, DollarSign, 
-  TrendingUp, TrendingDown, Shield, Settings, ExternalLink
+  TrendingUp, TrendingDown, Shield, Settings
 } from 'lucide-react'
 import {
   createDepositTransaction,
@@ -17,8 +17,7 @@ import {
   validateUSDCAmount,
   getVaultUSDCBalance,
   checkTokenAccountBalance,
-  getUSDCTokenAccount,
-  USDC_MINT_DEVNET
+  getUSDCTokenAccount
 } from '@/utils/vaultOperations'
 
 /**
@@ -37,7 +36,7 @@ interface ModalProps {
 
 // Enhanced Deposit Modal
 export function DepositModal({ onClose }: ModalProps) {
-  const connection = new Connection(clusterApiUrl('devnet'))
+  const connection = useMemo(() => new Connection(clusterApiUrl('devnet')), [])
   const { publicKey } = useSimpleWallet()
   const {
     vaultAddress,
@@ -66,7 +65,7 @@ export function DepositModal({ onClose }: ModalProps) {
         const userUSDCAccount = await getUSDCTokenAccount(publicKey)
         const accountInfo = await checkTokenAccountBalance(connection, userUSDCAccount)
         setUserUSDCBalance(accountInfo.balance / 1_000_000) // Convert to USDC units
-      } catch (err) {
+      } catch {
         console.error('Failed to fetch USDC balance:', err)
         setUserUSDCBalance(0)
       } finally {
@@ -84,7 +83,7 @@ export function DepositModal({ onClose }: ModalProps) {
         const parsedAmount = parseUSDCAmount(amount)
         const validation = validateUSDCAmount(parsedAmount, userUSDCBalance || 0)
         setValidationError(validation)
-      } catch (err) {
+      } catch {
         setValidationError('Invalid amount')
       }
     } else {
@@ -101,7 +100,7 @@ export function DepositModal({ onClose }: ModalProps) {
       setDepositPending()
       clearError()
       
-      const transaction = await createDepositTransaction(
+      await createDepositTransaction(
         connection,
         publicKey,
         vaultAddress,
@@ -121,9 +120,9 @@ export function DepositModal({ onClose }: ModalProps) {
       setDepositSuccess(newBalance * 1_000_000) // Convert back to smallest unit
       
       onClose()
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Deposit failed:', err)
-      setDepositError(err.message || 'Deposit failed')
+      setDepositError(err instanceof Error ? err.message : 'Deposit failed')
     }
   }
 
@@ -283,7 +282,7 @@ export function DepositModal({ onClose }: ModalProps) {
 
 // Enhanced Withdrawal Modal
 export function WithdrawModal({ onClose }: ModalProps) {
-  const connection = new Connection(clusterApiUrl('devnet'))
+  const connection = useMemo(() => new Connection(clusterApiUrl('devnet')), [])
   const { publicKey } = useSimpleWallet()
   const {
     vaultAddress,
@@ -299,7 +298,7 @@ export function WithdrawModal({ onClose }: ModalProps) {
 
   const [amount, setAmount] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
-  const [showConfirmation, setShowConfirmation] = useState(false)
+  const [showConfirmation] = useState(false)
 
   const maxWithdraw = currentBalance / 1_000_000
 
@@ -310,7 +309,7 @@ export function WithdrawModal({ onClose }: ModalProps) {
         const parsedAmount = parseUSDCAmount(amount)
         const validation = validateUSDCAmount(parsedAmount, maxWithdraw)
         setValidationError(validation)
-      } catch (err) {
+      } catch {
         setValidationError('Invalid amount')
       }
     } else {
@@ -327,7 +326,7 @@ export function WithdrawModal({ onClose }: ModalProps) {
       setWithdrawPending()
       clearError()
       
-      const transaction = await createWithdrawTransaction(
+      await createWithdrawTransaction(
         connection,
         publicKey,
         vaultAddress,
@@ -347,9 +346,9 @@ export function WithdrawModal({ onClose }: ModalProps) {
       setWithdrawSuccess(newBalance * 1_000_000) // Convert back to smallest unit
       
       onClose()
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Withdrawal failed:', err)
-      setWithdrawError(err.message || 'Withdrawal failed')
+      setWithdrawError(err instanceof Error ? err.message : 'Withdrawal failed')
     }
   }
 
@@ -539,7 +538,7 @@ export function WithdrawModal({ onClose }: ModalProps) {
 
 // Bot Authorization Modal
 export function BotAuthorizationModal({ onClose }: ModalProps) {
-  const connection = new Connection(clusterApiUrl('devnet'))
+  const connection = useMemo(() => new Connection(clusterApiUrl('devnet')), [])
   const { publicKey } = useSimpleWallet()
   const {
     vaultAddress,
@@ -554,7 +553,6 @@ export function BotAuthorizationModal({ onClose }: ModalProps) {
     clearError
   } = useVaultStore()
 
-  const [showConfirmation, setShowConfirmation] = useState(false)
   const [action, setAction] = useState<'authorize' | 'revoke'>('authorize')
 
   // XORJ Bot authority address (would be provided by the platform)
@@ -567,7 +565,7 @@ export function BotAuthorizationModal({ onClose }: ModalProps) {
       setAuthorizationPending()
       clearError()
       
-      const transaction = await createBotAuthorizationTransaction(
+      await createBotAuthorizationTransaction(
         connection,
         publicKey,
         vaultAddress,
@@ -587,9 +585,9 @@ export function BotAuthorizationModal({ onClose }: ModalProps) {
       }
       
       onClose()
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Authorization failed:', err)
-      setAuthorizationError(err.message || 'Authorization failed')
+      setAuthorizationError(err instanceof Error ? err.message : 'Authorization failed')
     }
   }
 

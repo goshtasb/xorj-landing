@@ -58,7 +58,7 @@ export function DangerZone() {
             <h3 className="text-white font-medium mb-2">Bot Deactivation</h3>
             <p className="text-gray-300 text-sm mb-4">
               Deactivate your trading bot and revoke all permissions. This will stop 
-              automated trading immediately and remove the bot's access to your vault.
+              automated trading immediately and remove the bot&apos;s access to your vault.
             </p>
           </div>
 

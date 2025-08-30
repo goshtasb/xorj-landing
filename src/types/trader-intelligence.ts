@@ -3,7 +3,24 @@
  * Comprehensive type definitions for transaction analysis and performance metrics
  */
 
-import { PublicKey } from '@solana/web3.js';
+// import { PublicKey } from '@solana/web3.js'; // Unused
+
+// Solana transaction metadata types
+interface TransactionError {
+  InstructionError?: [number, unknown];
+  InsufficientFunds?: null;
+  InvalidAccountIndex?: null;
+  [key: string]: unknown;
+}
+
+interface InnerInstruction {
+  index: number;
+  instructions: Array<{
+    programIdIndex: number;
+    accounts: number[];
+    data: string;
+  }>;
+}
 
 // Base transaction data structure
 export interface SolanaTransaction {
@@ -11,14 +28,14 @@ export interface SolanaTransaction {
   blockTime: number | null;
   slot: number;
   meta: {
-    err: any;
+    err: TransactionError | null;
     fee: number;
     preBalances: number[];
     postBalances: number[];
     preTokenBalances: TokenBalance[];
     postTokenBalances: TokenBalance[];
     logMessages: string[];
-    innerInstructions: any[];
+    innerInstructions: InnerInstruction[];
   };
   transaction: {
     message: {
@@ -229,7 +246,7 @@ export interface AnalysisError {
   type: 'rpc_error' | 'price_api_error' | 'parsing_error' | 'calculation_error';
   message: string;
   timestamp: number;
-  context?: Record<string, any>;
+  context?: Record<string, unknown>;
 }
 
 // Batch processing for multiple wallets
@@ -327,16 +344,14 @@ export type TraderTier = 'S' | 'A' | 'B' | 'C' | 'D';
 export type SupportedProgramId = '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8' | 'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK';
 export type SupportedTokenMint = 'So11111111111111111111111111111111111111112' | 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
-// Export all types as a namespace for organized imports
-export namespace TraderIntelligence {
-  export type Transaction = SolanaTransaction;
-  export type Swap = RaydiumSwap;
-  export type EnhancedSwap = EnhancedSwap;
-  export type Metrics = WalletPerformanceMetrics;
-  export type Analysis = WalletAnalysisResult;
-  export type Score = TraderScore;
-  export type Config = WalletAnalysisConfig;
-  export type PriceData = TokenPriceData;
-  export type Position = TokenPosition;
-  export type Trade = CompletedTrade;
-}
+// Export type aliases for organized imports
+export type TraderIntelligenceTransaction = SolanaTransaction;
+export type TraderIntelligenceSwap = RaydiumSwap;
+export type TraderIntelligenceEnhancedSwap = EnhancedSwap;
+export type TraderIntelligenceMetrics = WalletPerformanceMetrics;
+export type TraderIntelligenceAnalysis = WalletAnalysisResult;
+export type TraderIntelligenceScore = TraderScore;
+export type TraderIntelligenceConfig = WalletAnalysisConfig;
+export type TraderIntelligencePriceData = TokenPriceData;
+export type TraderIntelligencePosition = TokenPosition;
+export type TraderIntelligenceTrade = CompletedTrade;

@@ -290,7 +290,7 @@ export const WalletInfo: React.FC = () => {
           
           {/* Alternative: Use modal button */}
           <p style={{ fontSize: '12px', color: '#666', marginBottom: '10px' }}>
-            Or use "Select Wallet" button above ↑
+            Or use &quot;Select Wallet&quot; button above ↑
           </p>
           
           {/* Fallback: Direct connection */}
@@ -335,12 +335,12 @@ export const WalletInfo: React.FC = () => {
           
           <div style={{ backgroundColor: '#fff3cd', border: '1px solid #ffeaa7', borderRadius: '4px', padding: '10px' }}>
             <p style={{ fontSize: '11px', margin: '0 0 5px 0', fontWeight: 'bold', color: '#856404' }}>
-              💡 If connection fails with "Unexpected error":
+              💡 If connection fails with &quot;Unexpected error&quot;:
             </p>
             <ul style={{ fontSize: '10px', margin: 0, paddingLeft: '15px', color: '#856404' }}>
               <li>Make sure Phantom wallet is unlocked</li>
               <li>Allow popups for this website</li>
-              <li>Click "Connect" when Phantom popup appears</li>
+              <li>Click &quot;Connect&quot; when Phantom popup appears</li>
               <li>Try refreshing the page if needed</li>
             </ul>
           </div>

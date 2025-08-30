@@ -9,7 +9,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useSimpleWallet } from '@/contexts/SimpleWalletContext';
 import { useRouter } from 'next/navigation';
 import { UserProfileCard } from '@/components/UserProfileCard';
 import { BotControlsCard } from '@/components/BotControlsCard';
@@ -19,25 +19,38 @@ import { RiskProfileSelector } from '@/components/RiskProfileSelector';
 import { TransactionHistoryTable } from '@/components/TransactionHistoryTable';
 
 export default function ProfilePage() {
-  const { publicKey, connected } = useWallet();
+  const { publicKey, connected } = useSimpleWallet();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
+
+  console.log('🏠 ProfilePage debug:', { 
+    mounted, 
+    connected, 
+    publicKey: publicKey?.toString(), 
+    isDev: process.env.NODE_ENV === 'development',
+    contextType: 'SimpleWallet'
+  });
   
   // Ensure component is mounted before checking wallet connection
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Development mode - only check after mounting to prevent hydration mismatch
-  const isDevelopmentMode = mounted && typeof window !== 'undefined' && 
-    (window.location.search.includes('demo=true') || process.env.NODE_ENV === 'development');
+  console.log('🔧 Wallet connection debug:', { 
+    mounted, 
+    connected,
+    hasPublicKey: !!publicKey,
+    publicKeyString: publicKey?.toString(),
+    nodeEnv: process.env.NODE_ENV 
+  });
 
-  // Redirect to home if not connected (unless in development mode)
+  // Always require wallet connection - no demo mode allowed
   useEffect(() => {
-    if (mounted && !isDevelopmentMode && (!connected || !publicKey)) {
-      router.push('/');
+    if (mounted && (!connected || !publicKey)) {
+      console.log('🚨 Profile page: No wallet connected, would redirect to home (disabled for debugging)');
+      // Temporarily disabled: router.push('/');
     }
-  }, [connected, publicKey, router, isDevelopmentMode, mounted]);
+  }, [connected, publicKey, router, mounted]);
 
   // Always show loading state initially to prevent hydration mismatch
   if (!mounted) {
@@ -48,11 +61,22 @@ export default function ProfilePage() {
     );
   }
 
-  // After mounting, check if user should be redirected
-  if (!isDevelopmentMode && (!connected || !publicKey)) {
+  // After mounting, require wallet connection
+  if (!connected || !publicKey) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
-        <div className="text-white text-xl">Loading...</div>
+        <div className="flex flex-col items-center gap-4">
+          <div className="text-white text-xl">Wallet Connection Required</div>
+          <div className="text-gray-300 text-center">
+            Please connect your wallet to access your profile
+          </div>
+          <button
+            onClick={() => router.push('/')}
+            className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold"
+          >
+            Go Back to Home
+          </button>
+        </div>
       </div>
     );
   }
@@ -89,6 +113,7 @@ export default function ProfilePage() {
 
           {/* Bot Controls and Status */}
           <BotControlsCard />
+
 
           {/* Performance Dashboard */}
           <DashboardContainer />

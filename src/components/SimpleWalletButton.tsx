@@ -4,7 +4,6 @@ import React, { useState, useEffect } from 'react'
 import { PublicKey } from '@solana/web3.js'
 import { Wallet, LogOut, Loader2, AlertCircle, X, RefreshCw, Wifi, WifiOff } from 'lucide-react'
 import { useSimpleWallet } from '@/contexts/SimpleWalletContext'
-import type { PhantomProvider } from '@/types/phantom'
 
 interface SimpleWalletButtonProps {
   className?: string
@@ -41,7 +40,7 @@ export function SimpleWalletButton({ className = '', showFullAddress = false }: 
     try {
       await connect()
       console.log('✅ Direct connection successful')
-    } catch (err) {
+    } catch {
       console.error('❌ Direct connection failed, showing modal for alternative options')
       // If direct connection fails, show modal with manual options
       setShowModal(true)
@@ -201,7 +200,7 @@ export function SimpleWalletButton({ className = '', showFullAddress = false }: 
             <ul className="text-xs text-orange-200 space-y-1">
               <li>1. Check your internet connection</li>
               <li>2. Try connecting to a VPN</li>
-              <li>3. Use &apos;Manual Connect&apos; as a fallback</li>
+              <li>3. Refresh the page and try again</li>
               <li>4. Wait a moment and retry connection</li>
             </ul>
           </div>
@@ -241,7 +240,7 @@ export function SimpleWalletButton({ className = '', showFullAddress = false }: 
 // Simple connection modal
 function ConnectionModal({ onConnect, onClose }: { onConnect: () => void, onClose: () => void }) {
   const isPhantomAvailable = typeof window !== 'undefined' && 
-    ((window as any).phantom?.solana?.isPhantom || (window as any).solana?.isPhantom)
+    (window.phantom?.solana?.isPhantom || window.solana?.isPhantom)
   const [showManualInput, setShowManualInput] = useState(false)
   const [manualKey, setManualKey] = useState('')
 
@@ -263,7 +262,7 @@ function ConnectionModal({ onConnect, onClose }: { onConnect: () => void, onClos
         setTimeout(() => {
           window.location.reload()
         }, 100)
-      } catch (err) {
+      } catch {
         alert('Invalid public key format')
         return
       }
@@ -290,7 +289,7 @@ function ConnectionModal({ onConnect, onClose }: { onConnect: () => void, onClos
                   🔒 <strong>You will be asked to approve this connection</strong>
                 </p>
                 <p className="text-slate-300 text-xs">
-                  When you click "Connect with Phantom" below, your Phantom wallet will open a popup asking for permission to connect to this site. You must click "Connect" in that popup to proceed.
+                  When you click &quot;Connect with Phantom&quot; below, your Phantom wallet will open a popup asking for permission to connect to this site. You must click &quot;Connect&quot; in that popup to proceed.
                 </p>
               </div>
               
@@ -301,7 +300,7 @@ function ConnectionModal({ onConnect, onClose }: { onConnect: () => void, onClos
                 <ol className="text-blue-200 text-xs space-y-1">
                   <li>1. Make sure popups are allowed for this site</li>
                   <li>2. Phantom wallet must be unlocked</li>
-                  <li>3. Click "Connect" when Phantom popup appears</li>
+                  <li>3. Click &quot;Connect&quot; when Phantom popup appears</li>
                   <li>4. If no popup appears, check popup blocker settings</li>
                 </ol>
               </div>
@@ -318,32 +317,35 @@ function ConnectionModal({ onConnect, onClose }: { onConnect: () => void, onClos
                 </div>
               </button>
               
-              <div className="border-t border-slate-700 pt-4">
-                <button
-                  onClick={() => setShowManualInput(!showManualInput)}
-                  className="w-full text-sm text-slate-400 hover:text-slate-300"
-                >
-                  {showManualInput ? 'Hide' : 'Show'} manual connection (for testing)
-                </button>
-                
-                {showManualInput && (
-                  <div className="mt-3 space-y-2">
-                    <input
-                      type="text"
-                      placeholder="Enter your Solana public key for testing..."
-                      value={manualKey}
-                      onChange={(e) => setManualKey(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-white text-sm"
-                    />
-                    <button
-                      onClick={handleManualConnect}
-                      className="w-full py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded"
-                    >
-                      Connect Manually (Testing)
-                    </button>
-                  </div>
-                )}
-              </div>
+              {/* Manual connection for testing - disabled in production */}
+              {process.env.NODE_ENV !== 'production' && (
+                <div className="border-t border-slate-700 pt-4">
+                  <button
+                    onClick={() => setShowManualInput(!showManualInput)}
+                    className="w-full text-sm text-slate-400 hover:text-slate-300"
+                  >
+                    {showManualInput ? 'Hide' : 'Show'} manual connection (for testing)
+                  </button>
+                  
+                  {showManualInput && (
+                    <div className="mt-3 space-y-2">
+                      <input
+                        type="text"
+                        placeholder="Enter your Solana public key for testing..."
+                        value={manualKey}
+                        onChange={(e) => setManualKey(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded text-white text-sm"
+                      />
+                      <button
+                        onClick={handleManualConnect}
+                        className="w-full py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded"
+                      >
+                        Connect Manually (Testing)
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           ) : (
             <div className="text-center py-8">

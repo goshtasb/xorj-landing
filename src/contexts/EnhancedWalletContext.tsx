@@ -9,7 +9,7 @@ interface EnhancedWalletContextType {
   publicKey: PublicKey | null;
   connecting: boolean;
   disconnect: () => Promise<void>;
-  wallet: any;
+  wallet: { adapter?: { publicKey?: { toString(): string } } } | null;
 }
 
 const EnhancedWalletContext = createContext<EnhancedWalletContextType | null>(null);

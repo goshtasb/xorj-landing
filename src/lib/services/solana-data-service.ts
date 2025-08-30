@@ -3,7 +3,8 @@
  * Handles RPC connections and transaction fetching for wallet analysis
  */
 
-import { Connection, PublicKey, ConfirmedSignatureInfo, ParsedTransactionWithMeta, GetTransactionConfig } from '@solana/web3.js';
+import { Connection, PublicKey, ConfirmedSignatureInfo, GetTransactionConfig } from '@solana/web3.js';
+// import { ParsedTransactionWithMeta } from '@solana/web3.js'; // Unused
 import { SolanaTransaction, AnalysisError } from '@/types/trader-intelligence';
 import { SOLANA_CONFIG, ERROR_CONFIG } from '@/lib/constants';
 
@@ -80,8 +81,8 @@ export class SolanaDataService {
             fetchMore = false;
           }
 
-        } catch (error) {
-          console.error(`❌ Error fetching signature batch ${batchCount + 1}:`, error);
+        } catch {
+          console.error(`❌ Error fetching signature batch ${batchCount + 1}:`);
           errors.push({
             type: 'rpc_error',
             message: `Failed to fetch signatures batch ${batchCount + 1}: ${error}`,
@@ -95,8 +96,8 @@ export class SolanaDataService {
       console.log(`🎯 Total signatures fetched: ${allSignatures.length}`);
       return { signatures: allSignatures, errors };
 
-    } catch (error) {
-      console.error('❌ Fatal error in getWalletTransactionSignatures:', error);
+    } catch {
+      console.error('❌ Fatal error in getWalletTransactionSignatures:');
       errors.push({
         type: 'rpc_error',
         message: `Failed to fetch wallet signatures: ${error}`,
@@ -160,8 +161,8 @@ export class SolanaDataService {
           await this.sleep(200);
         }
 
-      } catch (error) {
-        console.error(`❌ Error processing transaction batch ${i + 1}:`, error);
+      } catch {
+        console.error(`❌ Error processing transaction batch ${i + 1}:`);
         errors.push({
           type: 'rpc_error',
           message: `Failed to process transaction batch ${i + 1}: ${error}`,
@@ -201,7 +202,7 @@ export class SolanaDataService {
   ): Promise<T> {
     try {
       return await operation();
-    } catch (error) {
+    } catch {
       if (attempt >= SOLANA_CONFIG.MAX_RETRIES) {
         throw error;
       }
@@ -219,12 +220,12 @@ export class SolanaDataService {
    */
   filterTransactionsByTimeRange(
     signatures: ConfirmedSignatureInfo[],
-    startTimestamp: number,
+    _startTimestamp: number,
     endTimestamp: number
   ): ConfirmedSignatureInfo[] {
     return signatures.filter(sig => {
       if (!sig.blockTime) return false;
-      return sig.blockTime >= startTimestamp && sig.blockTime <= endTimestamp;
+      return sig.blockTime >= _startTimestamp && sig.blockTime <= endTimestamp;
     });
   }
 
@@ -244,8 +245,8 @@ export class SolanaDataService {
 
       // This is an approximation - for exact count, we'd need to fetch all signatures
       return recentSignatures.length;
-    } catch (error) {
-      console.error('Error getting transaction count:', error);
+    } catch {
+      console.error('Error getting transaction count:');
       return 0;
     }
   }
@@ -257,8 +258,8 @@ export class SolanaDataService {
     try {
       const slot = await this.connection.getSlot();
       return slot > 0;
-    } catch (error) {
-      console.error('RPC connection health check failed:', error);
+    } catch {
+      console.error('RPC connection health check failed:');
       return false;
     }
   }
@@ -272,7 +273,7 @@ export class SolanaDataService {
     health: 'ok' | 'behind' | 'error';
     latency: number;
   }> {
-    const startTime = Date.now();
+    const _startTime = Date.now();
     
     try {
       const [slot, blockHeight] = await Promise.all([
@@ -280,7 +281,7 @@ export class SolanaDataService {
         this.connection.getBlockHeight()
       ]);
 
-      const latency = Date.now() - startTime;
+      const latency = Date.now() - _startTime;
       
       return {
         slot,
@@ -288,12 +289,12 @@ export class SolanaDataService {
         health: 'ok',
         latency
       };
-    } catch (error) {
+    } catch {
       return {
         slot: 0,
         blockHeight: 0,
         health: 'error',
-        latency: Date.now() - startTime
+        latency: Date.now() - _startTime
       };
     }
   }

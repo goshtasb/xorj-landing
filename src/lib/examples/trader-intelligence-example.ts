@@ -46,8 +46,8 @@ export async function exampleSingleWalletAnalysis() {
     }
 
     return result;
-  } catch (error) {
-    console.error('❌ Analysis failed:', error);
+  } catch {
+    console.error('❌ Analysis failed:');
     throw error;
   }
 }
@@ -99,8 +99,8 @@ export async function exampleBatchWalletAnalysis() {
     }
 
     return result;
-  } catch (error) {
-    console.error('❌ Batch analysis failed:', error);
+  } catch {
+    console.error('❌ Batch analysis failed:');
     throw error;
   }
 }
@@ -136,8 +136,8 @@ export async function exampleTokenFilteredAnalysis() {
     }
 
     return result;
-  } catch (error) {
-    console.error('❌ Token-filtered analysis failed:', error);
+  } catch {
+    console.error('❌ Token-filtered analysis failed:');
     throw error;
   }
 }
@@ -164,8 +164,8 @@ export async function exampleHealthCheck() {
     console.log(`Analysis Count: ${processing.currentAnalysisId}`);
 
     return { health, processing };
-  } catch (error) {
-    console.error('❌ Health check failed:', error);
+  } catch {
+    console.error('❌ Health check failed:');
     throw error;
   }
 }
@@ -239,8 +239,8 @@ export async function runAllExamples() {
     
     console.log('✅ All examples completed successfully!');
     
-  } catch (error) {
-    console.error('❌ Example execution failed:', error);
+  } catch {
+    console.error('❌ Example execution failed:');
     throw error;
   }
 }

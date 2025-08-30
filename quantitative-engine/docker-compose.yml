@@ -8,7 +8,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://xorj:xorj_password@postgres:5432/xorj_quant
+      - DATABASE_URL=postgresql://xorj:${POSTGRES_PASSWORD:-secure_dev_password}@postgres:5432/xorj_quant
       - REDIS_URL=redis://redis:6379
       - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.devnet.solana.com}
       - HELIUS_API_KEY=${HELIUS_API_KEY}
@@ -30,7 +30,7 @@ services:
     environment:
       - POSTGRES_DB=xorj_quant
       - POSTGRES_USER=xorj
-      - POSTGRES_PASSWORD=xorj_password
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-secure_dev_password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -57,7 +57,7 @@ services:
     build: .
     command: celery -A app.worker worker --loglevel=info --concurrency=2
     environment:
-      - DATABASE_URL=postgresql://xorj:xorj_password@postgres:5432/xorj_quant
+      - DATABASE_URL=postgresql://xorj:${POSTGRES_PASSWORD:-secure_dev_password}@postgres:5432/xorj_quant
       - REDIS_URL=redis://redis:6379
       - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.devnet.solana.com}
       - HELIUS_API_KEY=${HELIUS_API_KEY}
@@ -78,7 +78,7 @@ services:
     build: .
     command: celery -A app.worker beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     environment:
-      - DATABASE_URL=postgresql://xorj:xorj_password@postgres:5432/xorj_quant
+      - DATABASE_URL=postgresql://xorj:${POSTGRES_PASSWORD:-secure_dev_password}@postgres:5432/xorj_quant
       - REDIS_URL=redis://redis:6379
       - SOLANA_RPC_URL=${SOLANA_RPC_URL:-https://api.devnet.solana.com}
       - HELIUS_API_KEY=${HELIUS_API_KEY}
