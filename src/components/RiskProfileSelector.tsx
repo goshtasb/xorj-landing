@@ -119,9 +119,16 @@ export function RiskProfileSelector() {
           throw new Error(result.error || 'Failed to fetch settings');
         }
 
-        setCurrentSettings(result.data);
-        setSelectedProfile(result.data.riskProfile);
-        console.log('✅ Settings loaded:', result.data.riskProfile);
+        if (result.data === null) {
+          // No saved settings - user is new, use defaults but allow saving
+          console.log('🆕 No saved settings found - using defaults (user can save any selection)');
+          setCurrentSettings(null); // This will allow any selection to be saved
+          setSelectedProfile('Balanced'); // Default selection
+        } else {
+          setCurrentSettings(result.data);
+          setSelectedProfile(result.data.riskProfile);
+          console.log('✅ Settings loaded:', result.data.riskProfile);
+        }
 
       } catch (err) {
         console.error('❌ Settings fetch failed:', err);
@@ -142,7 +149,8 @@ export function RiskProfileSelector() {
 
   // Handle save settings
   const handleSave = async () => {
-    if (!currentSettings || selectedProfile === currentSettings.riskProfile) return;
+    // Allow saving if: 1) No current settings (new user), or 2) Settings have changed
+    if (currentSettings && selectedProfile === currentSettings.riskProfile) return;
 
     setSaving(true);
     setError(null);
@@ -189,8 +197,8 @@ export function RiskProfileSelector() {
     }
   };
 
-  // Check if settings have changed
-  const hasChanges = currentSettings && selectedProfile !== currentSettings.riskProfile;
+  // Check if settings have changed (or if this is a new user with no saved settings)
+  const hasChanges = !currentSettings || selectedProfile !== currentSettings.riskProfile;
 
   if (loading) {
     return (
