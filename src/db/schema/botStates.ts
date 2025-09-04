@@ -19,7 +19,7 @@
  * @see PRD Section: Bot Reliability Module
  */
 
-import { pgTable, uuid, text, boolean, jsonb, timestamp, integer } from 'drizzle-orm/pg-core';
+import { pgTable, text, boolean, jsonb, timestamp } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { relations } from 'drizzle-orm';
 import { createInsertSchema, createSelectSchema } from 'drizzle-zod';
@@ -104,14 +104,13 @@ export type BotConfiguration = z.infer<typeof botConfigurationSchema>;
  */
 export const botStates = pgTable('bot_states', {
   // Primary key - auto-generated UUID
-  id: uuid('id')
+  id: text('id')
     .primaryKey()
     .default(sql`gen_random_uuid()`)
     .notNull(),
   
   // Foreign key to users table
-  userId: uuid('user_id')
-    .references(() => users.id, { onDelete: 'cascade' })
+  userId: text('user_id')
     .notNull(),
   
   // Vault address this bot state manages
@@ -183,6 +182,7 @@ export const botStatesRelations = relations(botStates, ({ one }) => ({
 
 // Current state validation schema
 const currentStateSchema = z.enum(BOT_STATES, {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   errorMap: (_issue, _ctx) => {
     return { message: `Current state must be one of: ${BOT_STATES.join(', ')}` };
   }
@@ -282,7 +282,7 @@ export interface BotStateContext {
     state: BotState;
     event?: string;
     timestamp: Date;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
   }>;
 }
 

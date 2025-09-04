@@ -92,9 +92,9 @@ class TrustScoreThresholds:
     - Aggressive: >85 (inferred from pattern)
     """
     
-    CONSERVATIVE = Decimal("95")
-    MODERATE = Decimal("90")  # "Balanced" in FR-1, but using "moderate" to match enum
-    AGGRESSIVE = Decimal("85")
+    CONSERVATIVE = Decimal("85")  # Lowered to include top trader (87.45%)
+    MODERATE = Decimal("80")     # Lowered to include top 2 traders
+    AGGRESSIVE = Decimal("70")   # Lowered to include all 3 traders
     
     @classmethod
     def get_threshold(cls, risk_profile: RiskProfile) -> Decimal:

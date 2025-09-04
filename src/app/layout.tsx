@@ -7,6 +7,8 @@ import { SimpleWalletProvider } from "@/contexts/SimpleWalletContext";
 import { GlobalErrorProvider } from "@/contexts/GlobalErrorContext";
 import { BotStatusProvider } from "@/contexts/BotStatusContext";
 import GlobalErrorBanner from "@/components/GlobalErrorBanner";
+// Import RPC error handler to initialize global error handling
+import "@/lib/rpcErrorHandler";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

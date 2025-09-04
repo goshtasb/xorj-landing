@@ -15,21 +15,23 @@ export class BotStateStorage {
   
   static getBotState(walletAddress: string): { enabled: boolean; lastUpdated: string } {
     if (typeof window === 'undefined') {
-      // Server-side: return default state
-      return { enabled: true, lastUpdated: new Date().toISOString() };
+      // Server-side: default to DISABLED for new users
+      return { enabled: false, lastUpdated: new Date().toISOString() };
     }
 
     try {
       const states = localStorage.getItem(BOT_STATE_KEY);
       if (!states) {
-        return { enabled: true, lastUpdated: new Date().toISOString() };
+        // Default to DISABLED for new users - they must explicitly enable the bot
+        return { enabled: false, lastUpdated: new Date().toISOString() };
       }
 
       const parsedStates: Record<string, BotState> = JSON.parse(states);
       const state = parsedStates[walletAddress];
       
       if (!state) {
-        return { enabled: true, lastUpdated: new Date().toISOString() };
+        // Default to DISABLED for new users - they must explicitly enable the bot
+        return { enabled: false, lastUpdated: new Date().toISOString() };
       }
 
       return {
@@ -38,7 +40,8 @@ export class BotStateStorage {
       };
     } catch (error) {
       console.error('Error reading bot state:', error);
-      return { enabled: true, lastUpdated: new Date().toISOString() };
+      // Default to DISABLED for new users - they must explicitly enable the bot
+      return { enabled: false, lastUpdated: new Date().toISOString() };
     }
   }
 
@@ -90,7 +93,8 @@ export class ServerBotStateStorage {
   static getBotState(walletAddress: string): { enabled: boolean; lastUpdated: string } {
     const state = serverBotStates[walletAddress];
     if (!state) {
-      return { enabled: true, lastUpdated: new Date().toISOString() };
+      // Default to DISABLED for new users - they must explicitly enable the bot
+      return { enabled: false, lastUpdated: new Date().toISOString() };
     }
     return state;
   }

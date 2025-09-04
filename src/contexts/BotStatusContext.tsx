@@ -60,11 +60,12 @@ interface BotStatusProviderProps {
 
 export function BotStatusProvider({ children }: BotStatusProviderProps) {
   const walletContext = useSimpleWallet();
-  const { publicKey, connected, authenticated, authenticateManually } = walletContext;
+  const { publicKey, connected, authenticated } = walletContext;
   const [botStatus, setBotStatus] = useState<BotStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [hasValidAuth, setHasValidAuth] = useState(false);
 
   const effectivePublicKey = mounted ? publicKey?.toString() : undefined;
   const isWalletReady = mounted && effectivePublicKey && connected && authenticated;
@@ -75,6 +76,12 @@ export function BotStatusProvider({ children }: BotStatusProviderProps) {
 
   const fetchBotStatus = useCallback(async () => {
     if (!isWalletReady) {
+      console.log('🔄 BotStatusContext: Skipping fetch - wallet not ready', {
+        mounted,
+        publicKey: publicKey?.toString(),
+        connected,
+        authenticated
+      });
       setIsLoading(false);
       return;
     }
@@ -83,34 +90,37 @@ export function BotStatusProvider({ children }: BotStatusProviderProps) {
     setError(null);
 
     try {
-      console.log('🔄 BotStatusContext: Fetching bot status');
-      
-      // Try both token keys for backwards compatibility
-      let sessionToken = localStorage.getItem('xorj_session_token') || localStorage.getItem('xorj_jwt_token');
-      if (!sessionToken) {
-        throw new Error('No authentication token available');
-      }
+      console.log('🔄 BotStatusContext: Fetching bot status for authenticated wallet', {
+        publicKey: publicKey?.toString(),
+        connected,
+        authenticated
+      });
       
       const response = await fetch('/api/bot/status', {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${sessionToken}`,
           'Content-Type': 'application/json'
-        }
+        },
+        credentials: 'include' // Include httpOnly cookies for authentication
       });
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         
-        // If token expired, provide clear user guidance
-        if (response.status === 401 && (errorData.error?.includes('expired') || errorData.error?.includes('Invalid'))) {
-          console.log('🔑 JWT token expired - user needs to re-authenticate');
+        // If token expired or missing, provide clear user guidance
+        if (response.status === 401) {
+          console.log('🔑 Authentication required for bot status - user needs to authenticate');
           
-          // Clear expired tokens from localStorage
+          // Clear expired tokens from localStorage (legacy cleanup)
           localStorage.removeItem('xorj_session_token');
           localStorage.removeItem('xorj_jwt_token');
           
-          throw new Error('Your session has expired. Please refresh the page to sign in again.');
+          // CRITICAL: Return without setting error to prevent continuous polling
+          // Authentication errors should not trigger retries
+          setBotStatus(null);
+          setIsLoading(false);
+          setHasValidAuth(false); // Mark auth as invalid to stop polling
+          return;
         }
         
         throw new Error(errorData.error || `Bot status fetch failed: ${response.status}`);
@@ -121,11 +131,21 @@ export function BotStatusProvider({ children }: BotStatusProviderProps) {
       console.log('✅ BotStatusContext: Bot status fetched:', data.status);
       
       setBotStatus(data);
+      setError(null); // Clear any previous errors on successful fetch
+      setHasValidAuth(true); // Mark auth as valid when successful
       
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch bot status';
-      console.error('❌ BotStatusContext: Bot status fetch error:', errorMessage);
-      setError(errorMessage);
+      
+      // Only show error for unexpected failures, not auth issues
+      if (!errorMessage.includes('authenticate') && !errorMessage.includes('session') && !errorMessage.includes('token')) {
+        console.error('❌ BotStatusContext: Bot status fetch error:', errorMessage);
+        setError(errorMessage);
+      } else {
+        console.log('🔑 BotStatusContext: Authentication required -', errorMessage);
+        // Don't set error for auth issues to prevent UI error displays
+      }
+      
       setBotStatus(null);
     } finally {
       setIsLoading(false);
@@ -151,13 +171,21 @@ export function BotStatusProvider({ children }: BotStatusProviderProps) {
   // Auto-fetch when wallet is ready
   useEffect(() => {
     if (isWalletReady) {
+      // Initially assume auth might be valid when wallet connects
+      setHasValidAuth(true);
       fetchBotStatus();
     }
   }, [isWalletReady, fetchBotStatus]);
 
-  // Set up periodic refresh
+  // Set up periodic refresh - ONLY if authentication is valid
   useEffect(() => {
-    if (!isWalletReady) return;
+    // Don't poll if wallet isn't ready OR if auth has failed
+    if (!isWalletReady || !hasValidAuth) {
+      if (!hasValidAuth && isWalletReady) {
+        console.log('🔑 BotStatusContext: Stopping periodic refresh - authentication invalid');
+      }
+      return;
+    }
     
     const interval = setInterval(() => {
       console.log('🔄 BotStatusContext: Periodic refresh (every 30 seconds)');
@@ -165,7 +193,7 @@ export function BotStatusProvider({ children }: BotStatusProviderProps) {
     }, 30000); // 30 seconds
     
     return () => clearInterval(interval);
-  }, [isWalletReady, fetchBotStatus]);
+  }, [isWalletReady, hasValidAuth, fetchBotStatus]);
 
   const value: BotStatusContextType = {
     botStatus,

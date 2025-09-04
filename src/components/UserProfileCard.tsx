@@ -13,14 +13,12 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import { useSimpleWallet } from '@/contexts/SimpleWalletContext';
 import { useBotStatus } from '@/contexts/BotStatusContext';
 import { Copy, CheckCircle, AlertCircle, Loader2, RefreshCw } from 'lucide-react';
+import { BotActivityBadge } from './BotActivityBadge';
+import { RiskProfileSyncStatus } from './RiskProfileSyncStatus';
 // Removed direct walletBalanceService import to prevent CORS issues
 // Using server-side API endpoint instead
 
-interface BotStatus {
-  isBotActive: boolean;
-  lastUpdated?: number;
-  vaultAddress?: string;
-}
+
 
 export function UserProfileCard() {
   console.log('🎯🎯🎯 UserProfileCard: FUNCTION CALLED!!! ', new Date().toISOString());
@@ -31,7 +29,7 @@ export function UserProfileCard() {
     console.log('🖥️🖥️🖥️ UserProfileCard: SERVER MODE', Date.now());
   }
   const { publicKey } = useWallet();
-  const { connected, authenticated, connect, connecting } = useSimpleWallet();
+  const { connected, authenticated } = useSimpleWallet();
   const { botStatus: sharedBotStatus, isLoading: botStatusLoading, error: botStatusError } = useBotStatus();
   const [copied, setCopied] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -83,19 +81,12 @@ export function UserProfileCard() {
     try {
       console.log(`💰 UserProfileCard: Fetching wallet balance for: ${effectivePublicKey}`);
       
-      // Use server-side API endpoint instead of direct service call to avoid CORS
-      // Try both token keys for backwards compatibility
-      const sessionToken = localStorage.getItem('xorj_session_token') || localStorage.getItem('xorj_jwt_token');
-      if (!sessionToken) {
-        throw new Error('No authentication token available');
-      }
-      
       const response = await fetch(`/api/wallet/balance?walletAddress=${effectivePublicKey}`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${sessionToken}`,
           'Content-Type': 'application/json'
-        }
+        },
+        credentials: 'include' // Include httpOnly cookies for authentication
       });
       
       if (!response.ok) {
@@ -116,10 +107,15 @@ export function UserProfileCard() {
       }
       
       const data = await response.json();
-      const balance = data.balance?.usd || 0;
       
-      setWalletBalance(balance);
-      console.log(`✅ UserProfileCard: Wallet balance fetched: $${balance.toLocaleString()}`);
+      if (data.success && data.data) {
+        const balance = data.data.totalUsdValue || 0;
+        setWalletBalance(balance);
+        console.log(`✅ UserProfileCard: Live wallet balance updated: $${balance.toLocaleString()}`);
+      } else {
+        console.error('❌ UserProfileCard: Invalid balance API response structure:', data);
+        setWalletBalance(0);
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to fetch wallet balance';
       console.error('❌ UserProfileCard: Wallet balance fetch error:', errorMessage);
@@ -143,17 +139,17 @@ export function UserProfileCard() {
     if (!isWalletReady) return;
 
     fetchWalletBalance();
-    
+
     // Set up periodic refresh for wallet balance only (bot status handled by context)
     const interval = setInterval(() => {
       if (authenticated && connected && effectivePublicKey && mounted) {
         console.log('🔄 UserProfileCard: Periodic balance refresh (every 25 seconds)');
         fetchWalletBalance();
       }
-    }, 25000); // 25 seconds to avoid overlapping with BotControlsCard
-    
+    }, 90000); // Increased to 90 seconds to avoid overlapping with other components
+
     return () => clearInterval(interval);
-  }, [isWalletReady, authenticated, fetchWalletBalance]);
+  }, [isWalletReady, authenticated, connected, effectivePublicKey, mounted]); // Removed fetchWalletBalance to fix infinite loop
 
   // Note: Authentication is now handled automatically by SimpleWalletContext
   // No need for manual authentication calls here
@@ -226,6 +222,7 @@ export function UserProfileCard() {
     <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl p-6">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-semibold text-white">Wallet Information</h2>
+        <BotActivityBadge walletAddress={effectivePublicKey} refreshInterval={60} />
       </div>
       
       <div className="space-y-6">
@@ -408,6 +405,17 @@ export function UserProfileCard() {
             </div>
           </div>
         )}
+
+        {/* PERMANENT SOLUTION: Risk Profile Synchronization Status */}
+        <div className="border-t border-white/10 pt-6">
+          <h3 className="text-sm font-medium text-gray-300 mb-3">Risk Profile Synchronization</h3>
+          <RiskProfileSyncStatus 
+            walletAddress={effectivePublicKey}
+            autoRefresh={true}
+            refreshInterval={60}
+            showDetailedStatus={false}
+          />
+        </div>
       </div>
     </div>
   );

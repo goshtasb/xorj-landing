@@ -14,24 +14,29 @@
 import { NextRequest } from 'next/server';
 import { validateAuthToken, createErrorResponse, createSuccessResponse } from '@/lib/validation/middleware';
 
-// Only allow in development/test environments
-const isDevelopment = process.env.NODE_ENV === 'development';
-const isTestEnvironment = process.env.ENVIRONMENT === 'test' || process.env.ENVIRONMENT === 'staging';
-
-if (!isDevelopment && !isTestEnvironment) {
-  throw new Error('Debug endpoints are only available in development/test environments');
-}
+// Environment check moved to handler function to avoid build-time errors
 
 interface DebugExecutionResult {
   step: string;
   status: 'completed' | 'failed' | 'skipped';
   message: string;
-  data?: any;
+  data?: Record<string, unknown>;
   timestamp: number;
 }
 
 export async function POST(request: NextRequest) {
   try {
+    // SECURITY FIX: Only allow in strict development mode
+    if (process.env.NODE_ENV !== 'development') {
+      // Return 404 to hide existence of debug endpoints in production
+      return createErrorResponse(
+        'NOT_FOUND', 
+        'Endpoint not found', 
+        'The requested resource does not exist',
+        404
+      );
+    }
+
     console.log('🐛 Debug execution endpoint called');
     
     // Validate authentication
@@ -240,6 +245,16 @@ export async function POST(request: NextRequest) {
 
 // GET endpoint for checking if debug endpoints are available
 export async function GET() {
+  // SECURITY FIX: Only allow in strict development mode
+  if (process.env.NODE_ENV !== 'development') {
+    return createErrorResponse(
+      'NOT_FOUND', 
+      'Endpoint not found', 
+      'The requested resource does not exist',
+      404
+    );
+  }
+
   return createSuccessResponse(undefined, {
     message: 'Debug execution endpoint is available',
     environment: process.env.NODE_ENV,

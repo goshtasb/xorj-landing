@@ -25,16 +25,23 @@ export function detectWallets(): WalletDetectionResult {
     };
   }
 
-  const hasPhantom = !!(window as any).phantom?.solana;
-  const hasMetaMask = !!(window as any).ethereum?.isMetaMask;
-  const phantomAvailable = hasPhantom && !!(window as any).phantom?.solana?.isPhantom;
+  interface WindowWithWallets extends Window {
+    phantom?: { solana?: { isPhantom?: boolean } };
+    ethereum?: { isMetaMask?: boolean };
+    solana?: { isPhantom?: boolean };
+  }
+
+  const windowWithWallets = window as WindowWithWallets;
+  const hasPhantom = !!windowWithWallets.phantom?.solana;
+  const hasMetaMask = !!windowWithWallets.ethereum?.isMetaMask;
+  const phantomAvailable = hasPhantom && !!windowWithWallets.phantom?.solana?.isPhantom;
   
   // Check if MetaMask is interfering with Solana connections
   const metaMaskConflict = hasMetaMask && (
     // MetaMask injected itself as window.solana
-    (!!(window as any).solana && !(window as any).solana.isPhantom) ||
+    (!!windowWithWallets.solana && !windowWithWallets.solana.isPhantom) ||
     // MetaMask is blocking other wallet connections
-    ((window as any).ethereum && (window as any).ethereum.isMetaMask && !hasPhantom)
+    (windowWithWallets.ethereum && windowWithWallets.ethereum.isMetaMask && !hasPhantom)
   );
 
   let recommendation = '';
@@ -109,7 +116,8 @@ export async function connectPhantomWallet() {
   }
 
   // Try to get Phantom specifically
-  const phantom = (window as any).phantom?.solana;
+  const windowWithWallets = window as WindowWithWallets;
+  const phantom = windowWithWallets.phantom?.solana;
   
   if (!phantom) {
     throw new Error('Phantom wallet not found. Please install Phantom wallet.');
@@ -123,15 +131,15 @@ export async function connectPhantomWallet() {
     const response = await phantom.connect();
     console.log('✅ Phantom wallet connected successfully:', response.publicKey.toString());
     return response;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('❌ Phantom wallet connection failed:', error);
     
-    if (error.code === 4001) {
+    if ((error as { code?: number }).code === 4001) {
       throw new Error('Connection cancelled. Please approve the wallet connection.');
-    } else if (error.message?.includes('MetaMask')) {
+    } else if ((error as { message?: string }).message?.includes('MetaMask')) {
       throw new Error('MetaMask conflict detected. Please disable MetaMask and try again.');
     } else {
-      throw new Error(`Wallet connection failed: ${error.message || 'Unknown error'}`);
+      throw new Error(`Wallet connection failed: ${(error as { message?: string }).message || 'Unknown error'}`);
     }
   }
 }

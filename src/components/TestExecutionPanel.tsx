@@ -14,7 +14,7 @@ interface TestStep {
   name: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   message?: string;
-  data?: any;
+  data?: unknown;
   timestamp?: number;
 }
 
@@ -22,7 +22,7 @@ interface TestResult {
   step: string;
   status: 'completed' | 'failed' | 'skipped';
   message: string;
-  data?: any;
+  data?: unknown;
   timestamp: number;
 }
 
@@ -39,7 +39,7 @@ export function TestExecutionPanel() {
     { id: 'ui-refresh', name: 'Action 7: Verify UI data refresh', status: 'pending' }
   ]);
 
-  const updateStepStatus = useCallback((stepId: string, status: TestStep['status'], message?: string, data?: any) => {
+  const updateStepStatus = useCallback((stepId: string, status: TestStep['status'], message?: string, data?: unknown) => {
     setTestSteps(prev => prev.map(step => 
       step.id === stepId 
         ? { ...step, status, message, data, timestamp: Date.now() }
@@ -199,7 +199,8 @@ export function TestExecutionPanel() {
       )}
 
       <div className="space-y-3">
-        {testSteps.map((step, index) => (
+        {/* eslint-disable-next-line @typescript-eslint/no-unused-vars */}
+        {testSteps.map((step, _index) => (
           <div
             key={step.id}
             className="flex items-start gap-3 p-4 bg-white/5 rounded-lg border border-white/10"

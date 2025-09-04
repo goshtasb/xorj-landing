@@ -5,7 +5,7 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { 
   CheckCircle, 
   XCircle, 
@@ -25,7 +25,7 @@ interface TestSuite {
   name: string;
   description: string;
   status: 'not-started' | 'in-progress' | 'completed' | 'failed';
-  icon: React.ComponentType<any>;
+  icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
   testCases: TestCase[];
 }
 
@@ -44,7 +44,7 @@ interface SignOffCriteria {
 }
 
 export function TestSummaryPanel() {
-  const [testSuites, setTestSuites] = useState<TestSuite[]>([
+  const [testSuites] = useState<TestSuite[]>([
     {
       id: 'auth-failures',
       name: 'Test Suite 1: Authentication Failures',
@@ -146,7 +146,7 @@ export function TestSummaryPanel() {
     }
   ]);
 
-  const [signOffCriteria, setSignOffCriteria] = useState<SignOffCriteria[]>([
+  const [signOffCriteria] = useState<SignOffCriteria[]>([
     {
       id: 'all-tests-pass',
       criteria: 'All test suites must pass with 100% success rate',

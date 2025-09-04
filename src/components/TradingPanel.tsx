@@ -5,10 +5,10 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSimpleWallet } from '@/contexts/SimpleWalletContext';
 import { ArrowUpDown, DollarSign, AlertCircle, CheckCircle, Loader2, RefreshCw } from 'lucide-react';
-import { walletBalanceService } from '@/lib/walletBalance';
+
 
 interface TradeResult {
   tradeId: string;
@@ -60,21 +60,14 @@ export function TradingPanel() {
   const [walletBalance, setWalletBalance] = useState(0);
   const [loadingBalance, setLoadingBalance] = useState(false);
   
-  // Load wallet balance
-  useEffect(() => {
-    if (connected && publicKey) {
-      fetchWalletBalance();
-    }
-  }, [connected, publicKey]);
-
-  const fetchWalletBalance = async () => {
+  const fetchWalletBalance = useCallback(async () => {
     if (!publicKey) return;
-    
+
     setLoadingBalance(true);
     try {
       const response = await fetch(`/api/wallet/balance?walletAddress=${publicKey.toString()}`);
       const data = await response.json();
-      
+
       if (data.success) {
         setWalletBalance(data.data.totalUsdValue);
       }
@@ -83,7 +76,14 @@ export function TradingPanel() {
     } finally {
       setLoadingBalance(false);
     }
-  };
+  }, [publicKey]);
+
+  // Load wallet balance (remove reactive fetching to prevent infinite loops)
+  useEffect(() => {
+    if (connected && publicKey) {
+      fetchWalletBalance();
+    }
+  }, [connected, publicKey]); // Removed fetchWalletBalance from dependencies to prevent infinite loop
 
   const swapTokens = () => {
     const temp = fromToken;

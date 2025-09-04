@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { UserSettingsService, BotStateService, TradeService } from '@/lib/botStateService';
+import { UserSettingsService, BotStateServiceWithCache, TradeService } from '@/lib/botStateService';
 
 export async function GET(request: NextRequest) {
   const _startTime = Date.now();
@@ -39,16 +39,11 @@ export async function GET(request: NextRequest) {
       healthChecks.services.userSettings.error = 'Unknown error'
     }
 
-    // Test BotStateService
-    try {
-      const result = await BotStateService.getOrCreate('test_user_id');
-      healthChecks.services.botState.available = result.success;
-      if (!result.success) {
-        healthChecks.services.botState.error = result.error || 'Unknown error';
-      }
-    } catch {
-      healthChecks.services.botState.error = 'Unknown error'
-    }
+    // Test BotStateService - DISABLED to prevent NULL errors
+    // The test_user_id was causing database constraint violations
+    // Health check should not create test records in production database
+    healthChecks.services.botState.available = false;
+    healthChecks.services.botState.error = 'Health check disabled - was causing NULL constraint violations';
 
     // Test TradeService
     try {

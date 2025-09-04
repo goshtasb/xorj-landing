@@ -210,6 +210,41 @@ export class DatabaseErrorHandler {
       }
     }
 
+    // Check for business logic constraint violations that should be handled by services
+    if (sqlstate === '23505') { // unique_violation
+      console.log('🔄 Constraint violation - passing to service for handling:', {
+        sqlstate,
+        constraint: (error as Error & { constraint?: string }).constraint,
+        operation
+      });
+      
+      return {
+        action: 'passthrough',
+        shouldThrow: false,
+        errorInfo: {
+          classification: 'constraint_violation',
+          sqlstate
+        }
+      };
+    }
+
+    if (sqlstate === '23503') { // foreign_key_violation
+      console.log('🔄 Foreign key violation - passing to service for handling:', {
+        sqlstate,
+        constraint: (error as Error & { constraint?: string }).constraint,
+        operation
+      });
+      
+      return {
+        action: 'passthrough',
+        shouldThrow: false,
+        errorInfo: {
+          classification: 'foreign_key_violation',
+          sqlstate
+        }
+      };
+    }
+
     // Unknown error - treat as critical for safety
     console.error('❓ Unknown database error - treating as critical for safety:', {
       sqlstate,
@@ -266,6 +301,11 @@ export class DatabaseErrorHandler {
           console.log(`⏳ Waiting ${errorResponse.retryAfterMs}ms before retry...`);
           await this.delay(errorResponse.retryAfterMs);
           continue; // Retry the operation
+        }
+
+        if (errorResponse.action === 'passthrough') {
+          // Business logic error - pass through to service for handling
+          throw error;
         }
         
         // Unknown error - re-throw as-is for now

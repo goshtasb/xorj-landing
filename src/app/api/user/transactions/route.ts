@@ -11,10 +11,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { PublicKey } from '@solana/web3.js';
 import { v4 as uuidv4 } from 'uuid';
 import { TradeService } from '@/lib/botStateService';
+import { resilientRpcClient } from '@/lib/resilientRpcClient';
 
 // FIX (NFR-1): Mark the route handler as dynamic to prevent static rendering and ensure
 // it runs on the server for every request, respecting cache-control headers.
 export const dynamic = 'force-dynamic';
+
+// Solana RPC configuration
+const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 
 // --- Type Definitions ---
 export type TransactionType = 'BUY' | 'SELL' | 'DEPOSIT' | 'WITHDRAWAL';
@@ -275,47 +279,321 @@ function calculateTradePrice(trade: Record<string, unknown>): number {
 }
 
 /**
- * Fetches real transaction data from the backend bot service.
+ * Fetches real transaction data directly from Solana mainnet.
  * Returns an array of transactions, an empty array if none exist, or null on error.
  */
 async function fetchRealTransactions(walletAddress: string): Promise<Transaction[] | null> {
   try {
-    // FIX (NFR-1): Add { cache: 'no-store' } to prevent Next.js from caching this server-side fetch.
-    // This is the critical fix for the frontend not updating.
-    const response = await fetch(`http://localhost:8000/api/v1/bot/trades/${walletAddress}`, {
-      headers: { 'Content-Type': 'application/json' },
+    console.log(`🌐 Fetching mainnet transactions for wallet: ${walletAddress}`);
+    
+    // First try the bot service for any bot-executed trades
+    const botTrades = await fetchBotServiceTransactions(walletAddress);
+    if (botTrades && botTrades.length > 0) {
+      console.log(`✅ Found ${botTrades.length} bot service trades`);
+      return botTrades;
+    }
+    
+    // Fallback to direct Solana mainnet query
+    const mainnetTransactions = await fetchSolanaMainnetTransactions(walletAddress);
+    if (mainnetTransactions && mainnetTransactions.length > 0) {
+      console.log(`✅ Found ${mainnetTransactions.length} mainnet transactions`);
+      return mainnetTransactions;
+    }
+    
+    console.log(`⚠️ No transactions found for wallet: ${walletAddress}`);
+    return []; // No transactions found
+    
+  } catch (error) {
+    console.error(`❌ Failed to fetch real transactions for ${walletAddress}:`, error);
+    return null; // Indicates a failure
+  }
+}
+
+/**
+ * Fetches transactions from the bot service (for bot-executed trades)
+ */
+async function fetchBotServiceTransactions(walletAddress: string): Promise<Transaction[] | null> {
+  try {
+    const response = await fetch(`http://localhost:8001/api/v1/bot/trades/${walletAddress}`, {
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer 315f6e3460b6403a9ce7046fd5457f5d914b32dfc54f104d4458c619cb53c631'
+      },
       cache: 'no-store',
+      signal: AbortSignal.timeout(2000) // Fast timeout to prevent slowdowns
     });
 
     if (!response.ok) {
-      console.error(`Bot trades API returned non-OK status: ${response.status} for ${walletAddress}`);
+      console.log(`Bot service returned ${response.status} for ${walletAddress}`);
       return null;
     }
 
     const data = await response.json();
     if (!data.trades || data.trades.length === 0) {
-      return []; // No trades found is a valid state, not an error.
+      return []; // No bot trades found
     }
 
-    // Transform raw trade data into the standardized Transaction format.
+    // Transform bot trade data into the standardized Transaction format
     return data.trades.map((trade: Record<string, unknown>): Transaction => ({
       id: trade.trade_id || uuidv4(),
       walletAddress,
       timestamp: new Date(trade.timestamp).getTime(),
-      // FIX (FR-1): Use the actual trade side from the API. Fallback to a deterministic method.
       type: trade.side?.toUpperCase() === 'BUY' ? 'BUY' : 'SELL',
       status: trade.status === 'confirmed' ? 'COMPLETED' : trade.status === 'pending' ? 'PENDING' : 'FAILED',
-      symbol: trade.from_token,
-      amount: parseFloat(trade.from_amount),
-      price: parseFloat(trade.price),
-      totalValue: parseFloat(trade.from_amount) * parseFloat(trade.price),
-      fees: parseFloat(trade.fees_usd),
+      symbol: trade.from_token || 'UNKNOWN',
+      amount: parseFloat(trade.from_amount || '0'),
+      price: parseFloat(trade.price || '0'),
+      totalValue: parseFloat(trade.from_amount || '0') * parseFloat(trade.price || '0'),
+      fees: parseFloat(trade.fees_usd || '0'),
       txHash: trade.transaction_signature,
     }));
 
-  } catch {
-    console.error(`Bot trades API connection failed for ${walletAddress}:`);
-    return null; // Indicates a failure to connect to the service.
+  } catch (error) {
+    // Silently fail for bot service connections to avoid spamming logs
+    // console.log(`Bot service connection failed for ${walletAddress}:`, error);
+    return null;
   }
+}
+
+/**
+ * Fetches transactions directly from Solana mainnet RPC
+ */
+async function fetchSolanaMainnetTransactions(walletAddress: string): Promise<Transaction[] | null> {
+  try {
+    console.log(`🔗 Querying Solana mainnet for transactions: ${walletAddress}`);
+    
+    // Use resilient RPC client with exponential backoff
+    
+    const response = await fetch(SOLANA_RPC_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getSignaturesForAddress',
+        params: [
+          walletAddress,
+          {
+            limit: 50, // Limit to recent 50 transactions
+            commitment: 'confirmed'
+          }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      console.error(`❌ Solana RPC returned ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    if (data.error) {
+      console.error(`❌ Solana RPC error:`, data.error);
+      return null;
+    }
+
+    if (!data.result || data.result.length === 0) {
+      console.log(`⚠️ No mainnet transactions found for ${walletAddress}`);
+      return [];
+    }
+
+    console.log(`📊 Found ${data.result.length} mainnet signatures, fetching details...`);
+    
+    // Fetch detailed transaction data for the first few signatures
+    const detailedTransactions = [];
+    const signatures = data.result.slice(0, 10); // Limit to 10 most recent for performance
+    
+    for (const sig of signatures) {
+      try {
+        const txResponse = await fetch(SOLANA_RPC_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          cache: 'no-store',
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'getTransaction',
+            params: [
+              sig.signature,
+              {
+                encoding: 'json',
+                maxSupportedTransactionVersion: 0,
+                commitment: 'confirmed'
+              }
+            ]
+          })
+        });
+
+        if (txResponse.ok) {
+          const txData = await txResponse.json();
+          if (txData.result && !txData.result.meta?.err) {
+            const transaction = parseMainnetTransaction(txData.result, walletAddress, sig.signature);
+            if (transaction) {
+              detailedTransactions.push(transaction);
+            }
+          }
+        }
+      } catch (error) {
+        console.log(`Failed to fetch transaction details for ${sig.signature}:`, error);
+      }
+    }
+
+    console.log(`✅ Successfully parsed ${detailedTransactions.length} mainnet transactions`);
+    return detailedTransactions;
+
+  } catch (error) {
+    console.error(`❌ Failed to fetch Solana mainnet transactions:`, error);
+    return null;
+  }
+}
+
+/**
+ * Interface for Solana transaction data from RPC
+ */
+interface SolanaTransactionData {
+  blockTime?: number;
+  meta?: {
+    fee?: number;
+    preTokenBalances?: Array<{
+      accountIndex: number;
+      mint: string;
+      uiTokenAmount: {
+        amount: string;
+        decimals: number;
+        uiAmount: number;
+      };
+    }>;
+    postTokenBalances?: Array<{
+      accountIndex: number;
+      mint: string;
+      uiTokenAmount: {
+        amount: string;
+        decimals: number;
+        uiAmount: number;
+      };
+    }>;
+  };
+  transaction?: {
+    message?: {
+      instructions?: Array<{
+        programId: string;
+        accounts: string[];
+        data: string;
+      }>;
+    };
+  };
+}
+
+/**
+ * Parse a raw Solana transaction into our Transaction format
+ */
+function parseMainnetTransaction(txData: SolanaTransactionData, walletAddress: string, signature: string): Transaction | null {
+  try {
+    const meta = txData.meta;
+    const transaction = txData.transaction;
+    
+    if (!meta || !transaction) {
+      return null;
+    }
+
+    // Extract basic transaction info
+    const blockTime = txData.blockTime ? txData.blockTime * 1000 : Date.now();
+    const fee = meta.fee || 0;
+    
+    // Try to determine if this is a swap/trade transaction
+    const instructions = transaction.message?.instructions || [];
+    let isSwapTransaction = false;
+    let tokenIn = 'SOL';
+    let amount = 0;
+    
+    // Look for common DEX program IDs (Jupiter, Raydium, Orca, etc.)
+    const DEX_PROGRAM_IDS = [
+      'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN', // Jupiter V6
+      '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', // Jupiter V4
+      'EhdjXoNBjgZ9dshVgXJKFLhRvFfcBWcHX4TU2zWt7eAT', // Raydium AMM
+      'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', // Orca Whirlpool
+    ];
+
+    for (const instruction of instructions) {
+      const programId = transaction.message.accountKeys[instruction.programIdIndex];
+      if (DEX_PROGRAM_IDS.includes(programId)) {
+        isSwapTransaction = true;
+        break;
+      }
+    }
+
+    // If not a recognized swap, check pre/post token balances for changes
+    if (!isSwapTransaction && meta.preTokenBalances && meta.postTokenBalances) {
+      for (let i = 0; i < meta.preTokenBalances.length; i++) {
+        const preBalance = meta.preTokenBalances[i];
+        const postBalance = meta.postTokenBalances.find((pb) => pb.accountIndex === preBalance.accountIndex);
+        
+        if (postBalance && preBalance.uiTokenAmount.amount !== postBalance.uiTokenAmount.amount) {
+          isSwapTransaction = true;
+          amount = Math.abs(parseFloat(postBalance.uiTokenAmount.uiAmount || '0') - parseFloat(preBalance.uiTokenAmount.uiAmount || '0'));
+          tokenIn = preBalance.uiTokenAmount.amount > postBalance.uiTokenAmount.amount ? 
+                    (getTokenSymbolByMint(preBalance.mint) || 'UNKNOWN') : 
+                    (getTokenSymbolByMint(postBalance.mint) || 'UNKNOWN');
+          break;
+        }
+      }
+    }
+
+    // If no token changes detected, check SOL balance changes
+    if (!isSwapTransaction && meta.preBalances && meta.postBalances) {
+      for (let i = 0; i < meta.preBalances.length; i++) {
+        if (transaction.message.accountKeys[i] === walletAddress) {
+          const preBalance = meta.preBalances[i];
+          const postBalance = meta.postBalances[i];
+          if (Math.abs(preBalance - postBalance) > fee * 2) { // More than just fees
+            amount = Math.abs(preBalance - postBalance) / 1e9; // Convert lamports to SOL
+            isSwapTransaction = true;
+            break;
+          }
+        }
+      }
+    }
+
+    return {
+      id: signature,
+      walletAddress,
+      timestamp: blockTime,
+      type: isSwapTransaction ? (amount > 0 ? 'BUY' : 'SELL') : 'DEPOSIT',
+      status: meta.err ? 'FAILED' : 'COMPLETED',
+      symbol: tokenIn,
+      amount: amount,
+      price: 0, // Price calculation would require additional market data
+      totalValue: 0, // Total value calculation would require market prices
+      fees: fee / 1e9, // Convert lamports to SOL
+      txHash: signature,
+    };
+
+  } catch (error) {
+    console.log(`Failed to parse transaction ${signature}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Get token symbol by mint address
+ */
+function getTokenSymbolByMint(mint: string): string | null {
+  const TOKEN_REGISTRY: Record<string, string> = {
+    'So11111111111111111111111111111111111111112': 'SOL',
+    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 'USDC',
+    'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB': 'USDT',
+    'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN': 'JUP',
+    '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R': 'RAY',
+    'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': 'BONK',
+    'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE': 'ORCA',
+    'SRMuApVNdxXokk5GT7XD5cUUgXMBCoAz2LHeuAoKWRt': 'SRM',
+  };
+  
+  return TOKEN_REGISTRY[mint] || null;
 }
 

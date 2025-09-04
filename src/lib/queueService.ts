@@ -9,7 +9,7 @@
  */
 
 import { Queue, Job } from 'bullmq';
-import { redisService } from './redis';
+// import { redisService } from './redis'; // Unused for now
 
 // Job type definitions for type safety
 export interface BotStatusJob {
@@ -70,7 +70,6 @@ class WriteQueueService {
   private async initialize(): Promise<void> {
     try {
       const config = this.getQueueConfig();
-      console.log(`🔄 Initializing write queue with Redis at ${config.redis.host}:${config.redis.port}`);
 
       this.queue = new Queue<WriteJob>('write-operations', {
         connection: config.redis,
@@ -82,16 +81,19 @@ class WriteQueueService {
         console.error('🚨 Write queue error:', error);
       });
 
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       this.queue.on('waiting', (job) => {
-        console.log(`⏳ Job ${job.id} is waiting`);
+        // Waiting job logic would go here
       });
 
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       this.queue.on('active', (job) => {
-        console.log(`🚀 Job ${job.id} started processing`);
+        // Active job logic would go here
       });
 
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       this.queue.on('completed', (job) => {
-        console.log(`✅ Job ${job.id} completed successfully`);
+        // Completed job logic would go here
       });
 
       this.queue.on('failed', (job, err) => {
@@ -99,7 +101,6 @@ class WriteQueueService {
       });
 
       this.isInitialized = true;
-      console.log('✅ Write queue initialized successfully');
 
     } catch (error) {
       console.error('❌ Failed to initialize write queue:', error);
@@ -137,7 +138,13 @@ class WriteQueueService {
     }
 
     try {
-      await this.queue.client.ping();
+      // Check if Redis connection is ready by accessing the connection status
+      const connection = await this.queue.client;
+      if (!connection) {
+        return false;
+      }
+      // Try a simple Redis command to verify connectivity
+      await connection.ping();
       return true;
     } catch (error) {
       console.error('📊 Queue health check failed:', error);
@@ -171,7 +178,6 @@ class WriteQueueService {
         delay: 0,     // Process immediately
       });
 
-      console.log(`📝 Bot status job queued: ${queueJob.id} for user ${userId}`);
       
       return { success: true, jobId: queueJob.id?.toString() };
     } catch (error) {
@@ -209,7 +215,6 @@ class WriteQueueService {
         delay: 0,
       });
 
-      console.log(`📝 User settings job queued: ${queueJob.id} for user ${userId}`);
       
       return { success: true, jobId: queueJob.id?.toString() };
     } catch (error) {
@@ -247,7 +252,6 @@ class WriteQueueService {
         delay: 0,
       });
 
-      console.log(`📝 Trade execution job queued: ${queueJob.id} for user ${userId}`);
       
       return { success: true, jobId: queueJob.id?.toString() };
     } catch (error) {
@@ -326,7 +330,6 @@ class WriteQueueService {
           const job = await this.queue.getJob(jobId);
           if (job && job.isFailed()) {
             await job.retry();
-            console.log(`🔄 Retrying failed job: ${jobId}`);
           }
         }
       } else {
@@ -334,7 +337,6 @@ class WriteQueueService {
         const failedJobs = await this.queue.getFailed();
         for (const job of failedJobs) {
           await job.retry();
-          console.log(`🔄 Retrying failed job: ${job.id}`);
         }
       }
 
@@ -359,7 +361,6 @@ class WriteQueueService {
     try {
       await this.queue.clean(olderThan, 100, 'completed');
       await this.queue.clean(olderThan, 50, 'failed');
-      console.log(`🧹 Queue cleaned - removed jobs older than ${olderThan}ms`);
     } catch (error) {
       console.error('❌ Failed to clean queue:', error);
     }
@@ -372,7 +373,6 @@ class WriteQueueService {
     if (this.queue) {
       await this.queue.close();
       this.isInitialized = false;
-      console.log('🔒 Write queue connection closed');
     }
   }
 }

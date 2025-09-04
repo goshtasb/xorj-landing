@@ -7,7 +7,7 @@ and comprehensive validation.
 
 import os
 from typing import Optional
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, validator
 
 
@@ -49,7 +49,7 @@ class TradeExecutionConfig(BaseSettings):
     
     # Integration: Solana Network
     solana_network: str = Field(
-        default="devnet",
+        default="mainnet-beta",
         env="SOLANA_NETWORK",
         description="Solana network (mainnet-beta, testnet, devnet)"
     )
@@ -57,9 +57,15 @@ class TradeExecutionConfig(BaseSettings):
         env="SOLANA_RPC_URL",
         description="Solana RPC endpoint URL"
     )
+    helius_api_key: Optional[str] = Field(
+        default=None,
+        env="HELIUS_API_KEY",
+        description="Helius API key for premium RPC access and rate limiting"
+    )
     
     # XORJ Vault Smart Contract
     vault_program_id: str = Field(
+        default="5B8QtPsScaQsw392vnGnUaoiRQ8gy5LzzKdNeXe4qghR",
         env="XORJ_VAULT_PROGRAM_ID",
         description="Program ID of deployed XORJ Vault Smart Contract"
     )
@@ -256,14 +262,25 @@ class TradeExecutionConfig(BaseSettings):
             raise ValueError(f"HSM provider must be one of {valid_providers}")
         return v
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+    @property
+    def is_production(self) -> bool:
+        """Check if running in production environment.""" 
+        return self.environment == "production"
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8", 
+        case_sensitive=False,
+        extra="ignore"
+    )
 
 
-# Global configuration instance
-config = TradeExecutionConfig()
+# Global configuration instance  
+try:
+    config = TradeExecutionConfig()
+except Exception as e:
+    print(f"Configuration error: {e}")
+    config = None
 
 
 def get_config() -> TradeExecutionConfig:

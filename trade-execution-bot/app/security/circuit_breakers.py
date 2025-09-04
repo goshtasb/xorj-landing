@@ -799,6 +799,24 @@ class CircuitBreakerManager:
         
         return False
     
+    def get_all_states(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get all circuit breaker states in a simplified format.
+        
+        Returns:
+            Dict[str, Dict[str, Any]]: Dictionary mapping breaker names to their states
+        """
+        states = {}
+        
+        for breaker_type, breaker in self.breakers.items():
+            states[breaker.config.name] = {
+                "status": breaker.state.value,
+                "failure_count": breaker.failure_count,
+                "last_check": breaker.last_failure_time.isoformat() if breaker.last_failure_time else None
+            }
+        
+        return states
+    
     async def force_open_breaker(self, breaker_type: CircuitBreakerType, reason: str = "manual_override"):
         """Manually force open a specific circuit breaker."""
         if breaker_type not in self.breakers:

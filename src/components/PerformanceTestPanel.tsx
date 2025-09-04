@@ -149,7 +149,7 @@ export function PerformanceTestPanel() {
             value = Math.random() * 0.15; // Mock value for demo
             break;
           case 'memory-usage':
-            // @ts-ignore - performance.memory might not be available in all browsers
+            // @ts-expect-error - performance.memory might not be available in all browsers
             value = window.performance?.memory ? Math.round(window.performance.memory.usedJSHeapSize / 1024 / 1024) : null;
             break;
           case 'api-response-time':
@@ -278,7 +278,11 @@ export function PerformanceTestPanel() {
 
   const simulateMemoryLeakTest = async (): Promise<void> => {
     // Create and cleanup objects to test for memory leaks
-    const objects: any[] = [];
+    const objects: Array<{
+      id: number;
+      data: number[];
+      timestamp: number;
+    }> = [];
     
     for (let i = 0; i < 1000; i++) {
       objects.push({

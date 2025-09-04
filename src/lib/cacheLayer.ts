@@ -7,11 +7,6 @@
 import { redisService, cacheUtils } from './redis';
 import { query } from './database';
 
-// Type definition for database query results
-interface QueryResult<T = unknown> {
-  rows: T[];
-  rowCount: number | null;
-}
 
 // Types for caching operations
 interface CachedResponse<T> {

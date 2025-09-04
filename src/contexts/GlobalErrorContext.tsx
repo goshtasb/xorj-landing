@@ -41,6 +41,10 @@ interface GlobalErrorProviderProps {
 export function GlobalErrorProvider({ children }: GlobalErrorProviderProps) {
   const [errors, setErrors] = useState<GlobalError[]>([]);
 
+  const removeError = useCallback((id: string) => {
+    setErrors(prev => prev.filter(error => error.id !== id));
+  }, []);
+
   const addError = useCallback((message: string, type: GlobalError['type'] = 'general') => {
     const id = `error-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const error: GlobalError = {
@@ -60,11 +64,7 @@ export function GlobalErrorProvider({ children }: GlobalErrorProviderProps) {
     }
 
     return id;
-  }, []);
-
-  const removeError = useCallback((id: string) => {
-    setErrors(prev => prev.filter(error => error.id !== id));
-  }, []);
+  }, [removeError]);
 
   const clearAllErrors = useCallback(() => {
     setErrors([]);

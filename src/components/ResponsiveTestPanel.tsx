@@ -210,37 +210,37 @@ export function ResponsiveTestPanel() {
     }
 
     setIsRunningTests(false);
-  }, [currentViewport.width, responsiveTests]);
+  }, [currentViewport.width, responsiveTests, checkWalletButtonVisibility, checkNavigationCollapse, checkCardLayoutResponsive, checkTextReadability, checkButtonAccessibility]);
 
   // Basic responsive design checks
-  const checkWalletButtonVisibility = (): boolean => {
+  const checkWalletButtonVisibility = useCallback((): boolean => {
     const button = document.querySelector('[data-testid="connect-wallet"]');
     return button ? !!(button as HTMLElement).offsetParent : false;
-  };
+  }, []);
 
-  const checkNavigationCollapse = (): boolean => {
+  const checkNavigationCollapse = useCallback((): boolean => {
     // Check if navigation properly collapses on mobile
     return currentViewport.width > 640 || document.querySelector('[data-testid="mobile-menu"]') !== null;
-  };
+  }, [currentViewport.width]);
 
-  const checkCardLayoutResponsive = (): boolean => {
+  const checkCardLayoutResponsive = useCallback((): boolean => {
     const cards = document.querySelectorAll('[class*="grid"]');
     return cards.length > 0;
-  };
+  }, []);
 
-  const checkTextReadability = (): boolean => {
+  const checkTextReadability = useCallback((): boolean => {
     // Basic check for text size and contrast
     const textElements = document.querySelectorAll('p, span, div');
     return textElements.length > 0;
-  };
+  }, []);
 
-  const checkButtonAccessibility = (): boolean => {
+  const checkButtonAccessibility = useCallback((): boolean => {
     const buttons = document.querySelectorAll('button');
     return Array.from(buttons).every(btn => {
       const rect = btn.getBoundingClientRect();
       return rect.height >= 44; // Minimum touch target size
     });
-  };
+  }, []);
 
   const runBrowserCompatibilityTests = useCallback(async () => {
     setIsRunningTests(true);
@@ -275,31 +275,31 @@ export function ResponsiveTestPanel() {
     }
 
     setIsRunningTests(false);
-  }, []);
+  }, [browserTests, checkCSSGridSupport, checkFlexboxSupport, checkES6Support, checkWebCryptoAPI, checkLocalStorageSupport]);
 
   // Browser compatibility checks
-  const checkCSSGridSupport = (): boolean => {
+  const checkCSSGridSupport = useCallback((): boolean => {
     return CSS.supports('display', 'grid');
-  };
+  }, []);
 
-  const checkFlexboxSupport = (): boolean => {
+  const checkFlexboxSupport = useCallback((): boolean => {
     return CSS.supports('display', 'flex');
-  };
+  }, []);
 
-  const checkES6Support = (): boolean => {
+  const checkES6Support = useCallback((): boolean => {
     try {
       eval('const test = () => {}');
       return true;
     } catch {
       return false;
     }
-  };
+  }, []);
 
-  const checkWebCryptoAPI = (): boolean => {
+  const checkWebCryptoAPI = useCallback((): boolean => {
     return typeof window !== 'undefined' && 'crypto' in window && 'subtle' in window.crypto;
-  };
+  }, []);
 
-  const checkLocalStorageSupport = (): boolean => {
+  const checkLocalStorageSupport = useCallback((): boolean => {
     try {
       localStorage.setItem('test', 'test');
       localStorage.removeItem('test');
@@ -307,7 +307,7 @@ export function ResponsiveTestPanel() {
     } catch {
       return false;
     }
-  };
+  }, []);
 
   const getStatusIcon = (status: ResponsiveTest['status'] | BrowserTest['status']) => {
     switch (status) {

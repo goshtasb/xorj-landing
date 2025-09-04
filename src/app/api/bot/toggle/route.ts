@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     const duration = Date.now() - _startTime;
     
     if (updateResult.length > 0) {
-      const botState = updateResult[0];
+      const botState = updateResult[0] as { user_vault_address: string; is_enabled: boolean; updated_at: string };
       console.log(`✅ Bot ${enabled ? 'enabled' : 'disabled'} successfully for ${walletAddress}`);
       
       return NextResponse.json({

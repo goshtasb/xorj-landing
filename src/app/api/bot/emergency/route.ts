@@ -66,8 +66,8 @@ export async function POST(request: NextRequest) {
       console.log('✅ Bot emergency action executed via FastAPI gateway');
       return NextResponse.json(result);
       
-    } catch {
-      console.error('Failed to execute emergency action via FastAPI gateway:');
+    } catch (error) {
+      console.error('Failed to execute emergency action via FastAPI gateway:', error);
       
       if (error instanceof Error && error.name === 'TimeoutError') {
         return NextResponse.json(
@@ -165,8 +165,8 @@ export async function POST(request: NextRequest) {
         );
     }
 
-  } catch {
-    console.error('Bot emergency API error:');
+  } catch (error) {
+    console.error('Bot emergency API error:', error);
     return NextResponse.json(
       { error: 'Failed to process emergency action' },
       { status: 500 }
@@ -219,8 +219,8 @@ export async function GET(request: NextRequest) {
       console.log('✅ Emergency status fetched from FastAPI gateway');
       return NextResponse.json(emergencyStatus);
       
-    } catch {
-      console.error('Failed to fetch emergency status from FastAPI gateway:');
+    } catch (error) {
+      console.error('Failed to fetch emergency status from FastAPI gateway:', error);
       
       if (error instanceof Error && error.name === 'TimeoutError') {
         return NextResponse.json(
@@ -266,8 +266,8 @@ export async function GET(request: NextRequest) {
       _service_status: 'unavailable'
     });
 
-  } catch {
-    console.error('Bot emergency status API error:');
+  } catch (error) {
+    console.error('Bot emergency status API error:', error);
     return NextResponse.json(
       { error: 'Failed to fetch emergency status' },
       { status: 500 }

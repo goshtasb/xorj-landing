@@ -8,72 +8,54 @@ export const WalletInfo: React.FC = () => {
   
   // Debug wallet state on component mount and when wallets change
   useEffect(() => {
-    console.log('🔍 WalletInfo mounted/updated')
-    console.log('Wallets available:', wallets.length)
+    console.log('Wallets available:', wallets.length);
     console.log('Wallet details:', wallets.map(w => ({
       name: w.adapter.name,
       readyState: w.readyState,
       connected: w.adapter.connected,
       connecting: w.adapter.connecting
-    })))
+    })));
     
     // Check if Phantom is available in window object
     if (typeof window !== 'undefined') {
-      console.log('Window.solana exists:', !!window.solana)
-      console.log('Window.solana.isPhantom:', !!(window.solana && window.solana.isPhantom))
     }
   }, [wallets])
   
-  // Direct wallet selection handler  
+  // Direct wallet selection handler
   const handleSelectPhantom = () => {
-    console.log('🔍 Looking for Phantom wallet...')
-    console.log('Total available wallets:', wallets.length)
-    console.log('Available wallets:', wallets.map(w => ({ 
-      name: w.adapter.name, 
+    console.log('Available wallets:', wallets.map(w => ({
+      name: w.adapter.name,
       readyState: w.readyState,
       ready: w.readyState === 'Installed'
     })))
-    
+
     const phantomWallet = wallets.find(w => w.adapter.name === 'Phantom')
-    
+
     if (phantomWallet) {
-      console.log('✅ Found Phantom wallet:', {
+      console.log('Found Phantom wallet:', {
         name: phantomWallet.adapter.name,
         readyState: phantomWallet.readyState,
         url: phantomWallet.adapter.url,
         isInstalled: phantomWallet.readyState === 'Installed'
       })
-      
+
       if (phantomWallet.readyState !== 'Installed') {
-        console.warn('⚠️ Phantom wallet found but not in ready state')
-        console.warn('Ready state:', phantomWallet.readyState)
-        console.warn('Please ensure Phantom extension is installed and enabled')
+        console.error('❌ Phantom wallet is not installed or not ready')
         return
       }
-      
-      console.log('Selecting Phantom wallet...')
+
       select(phantomWallet.adapter.name)
-      console.log('Selection complete')
     } else {
       console.error('❌ Phantom wallet not found in available wallets')
-      console.log('This might mean:')
-      console.log('1. Phantom extension is not installed - visit https://phantom.app')
-      console.log('2. Phantom extension is disabled in browser')
-      console.log('3. Browser needs to be refreshed')
-      console.log('4. Component is still hydrating - try again in a moment')
     }
   }
 
   // Enhanced connect handler with detailed debugging
   const handleConnect = async () => {
-    console.log('=== STARTING CONNECTION PROCESS ===')
     
     try {
       // Step 0: Check if Phantom is available at browser level
       if (typeof window !== 'undefined') {
-        console.log('Browser Check:')
-        console.log('- window.solana exists:', !!window.solana)
-        console.log('- window.solana.isPhantom:', !!(window.solana && window.solana.isPhantom))
         
         if (!window.solana || !window.solana.isPhantom) {
           console.error('❌ PHANTOM NOT DETECTED IN BROWSER')
@@ -84,21 +66,14 @@ export const WalletInfo: React.FC = () => {
       }
       
       // Step 1: Check current wallet state
-      console.log('Step 1: Checking current wallet state...')
-      console.log('Current wallet:', wallet?.adapter?.name || 'None')
-      console.log('Connected:', connected)
-      console.log('Connecting:', connecting)
       
       // Step 2: If no wallet, try to select Phantom
       if (!wallet) {
-        console.log('Step 2: No wallet selected, attempting to select Phantom...')
         handleSelectPhantom()
         
         // Wait for selection to take effect
-        console.log('Waiting 2 seconds for wallet selection...')
         await new Promise(resolve => setTimeout(resolve, 2000))
         
-        console.log('After selection attempt - Current wallet:', wallet?.adapter?.name || 'Still None')
         
         if (!wallet) {
           console.error('❌ FAILED: Still no wallet selected after selection attempt')
@@ -108,7 +83,6 @@ export const WalletInfo: React.FC = () => {
           try {
             select('Phantom')
             await new Promise(resolve => setTimeout(resolve, 1000))
-            console.log('Alternative selection - Current wallet:', wallet?.adapter?.name || 'Still None')
           } catch (altError) {
             console.error('❌ Alternative selection also failed:', altError)
           }
@@ -122,10 +96,6 @@ export const WalletInfo: React.FC = () => {
       }
       
       // Step 3: Verify wallet is ready
-      console.log('Step 3: Verifying wallet readiness...')
-      console.log('Wallet adapter name:', wallet.adapter.name)
-      console.log('Wallet ready state:', wallet.adapter.readyState) 
-      console.log('Wallet URL:', wallet.adapter.url)
       
       if (wallet.adapter.readyState !== 'Installed') {
         console.error('❌ WALLET NOT READY')
@@ -135,13 +105,8 @@ export const WalletInfo: React.FC = () => {
       }
       
       // Step 4: Attempt connection
-      console.log('Step 4: Attempting connection...')
-      console.log('Calling connect() function...')
       await connect()
       
-      console.log('✅ CONNECTION SUCCESSFUL!')
-      console.log('Final state - Connected:', connected)
-      console.log('Final state - PublicKey:', publicKey?.toBase58()?.slice(0, 20) + '...')
       
     } catch (error) {
       console.error('❌ CONNECTION FAILED')
@@ -152,22 +117,14 @@ export const WalletInfo: React.FC = () => {
         console.error('Error message:', error.message)
         
         if (error.message === 'Unexpected error') {
-          console.warn('💡 Common causes of "Unexpected error":')
-          console.warn('1. Phantom popup was blocked by browser')
-          console.warn('2. User closed/dismissed the Phantom popup') 
-          console.warn('3. Phantom wallet is locked/not unlocked')
-          console.warn('4. Network connectivity issues')
-          console.warn('5. Phantom extension needs to be updated')
         }
       }
     }
     
-    console.log('=== CONNECTION PROCESS COMPLETE ===')
   }
 
   // Direct Phantom connection (fallback method)
   const handleDirectPhantomConnect = async () => {
-    console.log('=== ATTEMPTING DIRECT PHANTOM CONNECTION ===')
     
     try {
       if (typeof window === 'undefined' || !window.solana || !window.solana.isPhantom) {
@@ -175,20 +132,16 @@ export const WalletInfo: React.FC = () => {
         return
       }
       
-      console.log('🦄 Connecting directly to window.solana...')
-      const response = await window.solana.connect()
-      console.log('✅ Direct Phantom connection response:', response)
-      console.log('Public Key:', response.publicKey?.toString())
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const _response = await window.solana.connect()
       
       // Now try to sync this with wallet adapter
-      console.log('Attempting to sync with wallet adapter...')
       handleSelectPhantom()
       
     } catch (error) {
       console.error('❌ Direct Phantom connection failed:', error)
     }
     
-    console.log('=== DIRECT CONNECTION ATTEMPT COMPLETE ===')
   }
 
   return (

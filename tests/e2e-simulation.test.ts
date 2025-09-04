@@ -26,7 +26,7 @@ describe('XORJ Backend End-to-End Simulation', () => {
   let testDb: ReturnType<typeof drizzle>;
   let dbPool: Pool;
   let mockRpcServer: MockRpcServer;
-  let mockPriceApi: any;
+  let mockPriceApi: unknown;
 
   // Test data constants
   const TEST_USER_ID = 'user-id-123';

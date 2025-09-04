@@ -72,14 +72,13 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
 
   // Solana network connection for health checking (client-side only)
   const connection = useMemo(() => 
-    typeof window !== 'undefined' ? new Connection(clusterApiUrl('devnet')) : null, 
+    typeof window !== 'undefined' ? new Connection(process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com') : null, 
     []
   )
 
   // Enhanced error categorization
   const categorizeError = useCallback((err: unknown): string => {
     const error = err as Error & { code?: number }
-    console.log('Categorizing error:', error)
     
     // Phantom-specific error codes
     if (error.code === -32603) {
@@ -105,7 +104,7 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
     }
   }, [])
 
-  // Network health check
+  // Network health check with RPC rate limiting protection
   const checkNetworkHealth = useCallback(async (): Promise<boolean> => {
     if (!connection) {
       setNetworkStatus('offline')
@@ -114,13 +113,29 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
     
     try {
       setNetworkStatus('checking')
-      await connection.getVersion()
+      
+      // Use a lighter RPC call with shorter timeout to reduce rate limiting
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 3000) // 3 second timeout
+      
+      await Promise.race([
+        connection.getSlot({ commitment: 'finalized' }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Health check timeout')), 3000)
+        )
+      ])
+      
+      clearTimeout(timeoutId)
       setNetworkStatus('online')
       return true
-    } catch (error) {
-      console.error('Network health check failed:', error)
-      setNetworkStatus('offline')
-      return false
+    } catch (error: unknown) {
+      // Handle all RPC errors gracefully - don't block wallet operations
+      console.warn('⚠️ Solana RPC health check failed (expected with public endpoints):', error instanceof Error ? error.message : error)
+      
+      // Always return true and set status to 'error' instead of 'offline'
+      // This allows wallet operations to continue even if RPC health checks fail
+      setNetworkStatus('error')
+      return true // Allow wallet operations to continue regardless of RPC status
     }
   }, [connection])
 
@@ -129,31 +144,30 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
     setError(null)
   }, [])
 
-  // Token validation function
-  const validateToken = useCallback(() => {
+  // Token validation function - now uses server-side validation since tokens are httpOnly
+  const validateToken = useCallback(async () => {
     if (typeof window === 'undefined') return false
     
-    const token = localStorage.getItem('xorj_jwt_token')
-    if (!token) return false
-    
     try {
-      // Decode JWT token to check expiration
-      const payload = JSON.parse(atob(token.split('.')[1]))
-      const currentTime = Math.floor(Date.now() / 1000)
+      // Make a request to a protected endpoint to validate the httpOnly cookie
+      const response = await fetch('/api/auth/validate', {
+        method: 'GET',
+        credentials: 'include', // Include httpOnly cookies
+      })
       
-      if (payload.exp && payload.exp < currentTime) {
-        console.log('🔒 JWT token has expired')
-        localStorage.removeItem('xorj_jwt_token')
-        setError('Your session has expired. Please log in again.')
-        setAuthenticated(false)
-        return false
+      if (response.ok) {
+        const result = await response.json()
+        if (result.success) {
+          return true
+        }
       }
       
-      return true
-    } catch (error) {
-      console.error('❌ Invalid JWT token:', error)
-      localStorage.removeItem('xorj_jwt_token')
+      // Token invalid or expired
       setError('Your session has expired. Please log in again.')
+      setAuthenticated(false)
+      return false
+    } catch (error) {
+      console.error('❌ Token validation failed:', error)
       setAuthenticated(false)
       return false
     }
@@ -163,18 +177,15 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
   const authenticateWithGateway = useCallback(async (walletAddress: string) => {
     // Prevent multiple concurrent authentication attempts
     if (authLoading) {
-      console.log('🔐 Authentication already in progress, skipping duplicate call')
       return
     }
 
     // Don't authenticate if wallet isn't connected
     if (!connected || !publicKey) {
-      console.log('🔐 Wallet not connected, skipping authentication')
       return
     }
 
     try {
-      console.log('🔐 Authenticating with gateway:', walletAddress)
       setAuthLoading(true)
       setError(null)
       
@@ -193,23 +204,15 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
       
       if (response.ok) {
         const result = await response.json()
-        if (result.success && result.session_token) {
-          // Store the session token in botService
-          await import('@/lib/botService')
-          
-          // Manually store the session token since we got it from the server
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('xorj_session_token', result.session_token)
-          }
-          
+        if (result.success) {
+          // Authentication successful - JWT token is now stored as httpOnly cookie
+          // No need to store anything in localStorage for security
+          console.log('✅ Authentication successful via wallet adapter')
           setAuthenticated(true)
-          console.log('✅ Gateway authentication successful - session token stored')
         } else {
-          console.warn('⚠️ Gateway authentication failed:', result.error)
           setAuthenticated(false)
         }
       } else {
-        console.warn('⚠️ Gateway authentication request failed:', response.status)
         setAuthenticated(false)
       }
     } catch (error) {
@@ -224,7 +227,6 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
   // Authentication with actual signature for proper signature verification
   const authenticateWithSignature = useCallback(async (walletAddress: string, signature: string, message: string) => {
     try {
-      console.log('🔐 Authenticating with real signature for:', walletAddress)
       setAuthLoading(true)
       setError(null)
       
@@ -243,22 +245,18 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
       
       if (response.ok) {
         const result = await response.json()
-        if (result.success && result.session_token) {
-          // Store the JWT token
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('xorj_jwt_token', result.session_token)
-          }
-          
+        if (result.success) {
+          // Authentication successful - JWT token is now stored as httpOnly cookie
+          // No need to store anything in localStorage for security
+          console.log('✅ Authentication successful via signature')
           setAuthenticated(true)
-          console.log('✅ Authentication successful with real signature - session token stored')
         } else {
-          console.warn('⚠️ Authentication failed:', result.error)
           setError('Authentication failed. Please try again.')
           setAuthenticated(false)
         }
       } else {
-        console.warn('⚠️ Authentication request failed:', response.status)
-        setError('Authentication failed. Please try again.')
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        setError(errorData.message || 'Authentication failed. Please try again.')
         setAuthenticated(false)
       }
     } catch (error) {
@@ -277,7 +275,6 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
 
   //   // If wallet is connected via Solana adapter, authenticate automatically
   //   if (connected && publicKey && !authenticated && !authLoading) {
-  //     console.log('SimpleWalletContext: Wallet connected via adapter, authenticating:', publicKey.toString())
   //     authenticateWithGateway(publicKey.toString())
   //   }
   // }, [connected, publicKey, authenticated, authLoading, authenticateWithGateway])
@@ -293,14 +290,11 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
   // Connection is handled by Solana adapter - this just clears errors
   const connect = useCallback(async () => {
     setError(null)
-    console.log('SimpleWallet: Connection is handled by Solana adapter')
 
     try {
-      // First check network health
-      const networkHealthy = await checkNetworkHealth()
-      if (!networkHealthy) {
-        throw new Error('network')
-      }
+      // Check network health but don't fail if RPC is rate limited
+      await checkNetworkHealth()
+      // Network health check now always returns true for rate-limited RPCs
 
       if (typeof window === 'undefined') {
         throw new Error('Window not available')
@@ -320,42 +314,29 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
         throw new Error('Invalid Phantom wallet detected')
       }
       
-      console.log('=== Phantom Wallet Debug Info ===')
-      console.log('Phantom available:', !!provider)
-      console.log('Is Phantom:', provider?.isPhantom)
-      console.log('Already connected:', provider?.isConnected)
-      console.log('Current publicKey:', provider?.publicKey?.toString())
-      console.log('================================')
       
       // Always disconnect first to ensure fresh connection prompt
       if (provider.isConnected) {
-        console.log('Wallet already connected, disconnecting to show fresh prompt')
         try {
           await provider.disconnect()
         } catch (disconnectError) {
-          console.log('Disconnect error (expected):', disconnectError)
+          console.warn('Disconnect error during reconnection:', disconnectError);
         }
       }
       
-      console.log('Requesting new Phantom wallet connection...')
-      console.log('This will prompt user for permission')
       
       try {
         // First try to connect with user permission (this should show popup)
-        console.log('Calling provider.connect() - user will see permission dialog')
         
         // Use different connection strategies
         let connectPromise: Promise<{ publicKey: PublicKey }>
         
         // Strategy 1: Standard connect call that should trigger user prompt
         try {
-          console.log('Attempting standard connect with onlyIfTrusted: false')
           connectPromise = provider.connect({ onlyIfTrusted: false })
         } catch {
-          console.log('Standard connect failed, trying alternative approach')
           // Strategy 2: Try requesting permissions explicitly first
           if (provider.request) {
-            console.log('Trying explicit permission request')
             await provider.request('connect', {})
           }
           connectPromise = provider.connect()
@@ -365,14 +346,10 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
           setTimeout(() => reject(new Error('Connection timeout - User may have dismissed the permission dialog')), 30000)
         )
         
-        console.log('Waiting for user to approve connection in Phantom wallet...')
         const response = await Promise.race([connectPromise, timeoutPromise]) as { publicKey: PublicKey }
         
-        console.log('Connect response:', response)
         
         if (response && response.publicKey) {
-          console.log('✅ User approved connection! Wallet connected:', response.publicKey.toString())
-          setPublicKey(response.publicKey)
           setError(null)
           
           // Automatically authenticate with the gateway after wallet connection
@@ -420,7 +397,6 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
       return
     }
     
-    console.log('🔐 Manual authentication triggered for:', publicKey.toString())
     
     try {
       // Request signature from user's wallet
@@ -437,7 +413,6 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
         return;
       }
       
-      console.log('🔐 Requesting signature from user for message:', message);
       
       // Request signature - user can reject this
       const signedMessage = await provider.signMessage(encodedMessage, 'utf8');
@@ -447,7 +422,6 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
         return;
       }
       
-      console.log('✅ User provided signature, proceeding with authentication');
       
       // Convert signature to base64 for API
       const signature = btoa(String.fromCharCode(...new Uint8Array(signedMessage.signature)));
@@ -466,7 +440,7 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
         setError('Authentication failed. Please try again.');
       }
     }
-  }, [connected, publicKey])
+  }, [connected, publicKey, authenticateWithSignature])
 
   // Retry connection function
   const retryConnection = useCallback(async () => {
@@ -478,11 +452,21 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
     try {
       // Clear all XORJ-related cache
       window.localStorage.removeItem('manual_wallet_key')
-      window.localStorage.removeItem('xorj_session_token')
-      window.localStorage.removeItem('xorj_jwt_token')
+      window.localStorage.removeItem('xorj_session_token') // Legacy cleanup
+      window.localStorage.removeItem('xorj_jwt_token') // Legacy cleanup
       
       // Clear authentication
       setAuthenticated(false)
+      
+      // Clear httpOnly cookie by calling logout endpoint
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          credentials: 'include'
+        })
+      } catch (logoutError) {
+        console.warn('Logout API call failed:', logoutError)
+      }
       
       // Disconnect phantom if connected
       const phantomProvider = window.phantom?.solana
@@ -492,9 +476,7 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
       if (provider) {
         await provider.disconnect()
       }
-      setPublicKey(null)
       setError(null)
-      console.log('SimpleWalletContext: Disconnected and deauthenticated')
     } catch (err: unknown) {
       const error = err as Error
       console.error('Disconnect error:', error)
@@ -507,20 +489,22 @@ export function SimpleWalletProvider({ children }: SimpleWalletProviderProps) {
     if (typeof window === 'undefined') return
     
     // Check token validity on mount/refresh
-    const isValidToken = validateToken()
-    if (isValidToken && connected && publicKey) {
-      setAuthenticated(true)
-      console.log('✅ Valid token found, user is authenticated')
+    const checkTokenOnMount = async () => {
+      const isValidToken = await validateToken()
+      if (isValidToken && connected && publicKey) {
+        setAuthenticated(true)
+      }
     }
     
+    checkTokenOnMount()
     checkNetworkHealth()
     
-    // Periodic network health checks every 30 seconds
+    // Periodic network health checks every 5 minutes (reduced to minimize RPC calls)
     const healthCheckInterval = setInterval(() => {
       if (!connecting && !connected) {
         checkNetworkHealth()
       }
-    }, 30000)
+    }, 300000) // 5 minutes to reduce RPC pressure significantly
 
     return () => clearInterval(healthCheckInterval)
   }, [checkNetworkHealth, connecting, connected, validateToken, publicKey])

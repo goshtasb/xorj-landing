@@ -97,6 +97,9 @@ class RedisService {
       this.isConnected = false;
       this.client = null;
       // Don't throw - allow application to continue without caching
+    } finally {
+      // Clear the connection promise so future calls don't wait
+      this.connectionPromise = null;
     }
   }
 
@@ -129,6 +132,15 @@ class RedisService {
    * Check if Redis is available and connected
    */
   async isAvailable(): Promise<boolean> {
+    // Wait for initialization to complete if still in progress
+    if (this.connectionPromise) {
+      try {
+        await this.connectionPromise;
+      } catch (error) {
+        // Connection failed, continue with unavailable state
+      }
+    }
+
     if (!this.client || !this.isConnected) {
       console.log('📊 Redis not available: client not connected');
       return false;
@@ -295,8 +307,17 @@ class RedisService {
   }
 }
 
+// Ensure singleton pattern in development mode (Next.js hot reload)
+const globalForRedis = globalThis as unknown as {
+  redisService: RedisService | undefined;
+};
+
 // Export singleton instance
-export const redisService = new RedisService();
+export const redisService = globalForRedis.redisService ?? new RedisService();
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForRedis.redisService = redisService;
+}
 
 // Export utilities for direct use
 export const cacheUtils = {

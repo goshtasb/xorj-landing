@@ -3,17 +3,12 @@ Configuration Schema Definitions
 """
 
 from typing import Dict, Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 class SystemConfiguration(BaseModel):
     """System-wide configuration settings"""
-    environment: str = Field(default="development", description="Runtime environment")
-    debug_mode: bool = Field(default=True, description="Enable debug logging")
-    max_concurrent_trades: int = Field(default=10, description="Maximum concurrent trades")
-    health_check_interval: int = Field(default=30, description="Health check interval in seconds")
-    
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "environment": "production",
                 "debug_mode": False,
@@ -21,18 +16,17 @@ class SystemConfiguration(BaseModel):
                 "health_check_interval": 60
             }
         }
+    )
+    
+    environment: str = Field(default="development", description="Runtime environment")
+    debug_mode: bool = Field(default=True, description="Enable debug logging")
+    max_concurrent_trades: int = Field(default=10, description="Maximum concurrent trades")
+    health_check_interval: int = Field(default=30, description="Health check interval in seconds")
 
 class BotConfiguration(BaseModel):
     """User-specific bot configuration"""
-    user_id: str = Field(..., description="User identifier")
-    risk_profile: str = Field(default="balanced", description="Risk tolerance level")
-    slippage_tolerance: float = Field(default=1.0, ge=0.1, le=5.0, description="Maximum allowed slippage %")
-    enabled: bool = Field(default=True, description="Bot enabled status")
-    max_trade_amount: int = Field(default=10000, ge=100, description="Maximum trade amount in USD")
-    trading_pairs: list = Field(default_factory=list, description="Allowed trading pairs")
-    
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "user_id": "user123",
                 "risk_profile": "aggressive",
@@ -42,6 +36,14 @@ class BotConfiguration(BaseModel):
                 "trading_pairs": ["SOL/USDC", "JUP/SOL"]
             }
         }
+    )
+    
+    user_id: str = Field(..., description="User identifier")
+    risk_profile: str = Field(default="moderate", description="Risk tolerance level (conservative, moderate, aggressive)")
+    slippage_tolerance: float = Field(default=1.0, ge=0.1, le=5.0, description="Maximum allowed slippage %")
+    enabled: bool = Field(default=True, description="Bot enabled status")
+    max_trade_amount: int = Field(default=10000, ge=100, description="Maximum trade amount in USD")
+    trading_pairs: list = Field(default_factory=list, description="Allowed trading pairs")
 
 class HSMConfiguration(BaseModel):
     """Hardware Security Module configuration"""

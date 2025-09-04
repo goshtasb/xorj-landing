@@ -56,7 +56,7 @@ export function withFailFastProtection<T extends unknown[], R>(
   return async (...args: T): Promise<NextResponse<R | ApiErrorResponse>> => {
     try {
       return await handler(...args);
-    } catch {
+    } catch (error) {
       // CRITICAL: Database errors trigger system-wide fail-safe mode
       if (error instanceof CriticalDatabaseError) {
         console.error('🚨 CRITICAL DATABASE ERROR - API entering fail-safe mode:', {
@@ -131,7 +131,7 @@ export async function verifyTradingSafetyStatus(): Promise<{
     // For now, we assume if we can import without errors, we're in a reasonable state
     return { safe: true };
     
-  } catch {
+  } catch (error) {
     if (error instanceof CriticalDatabaseError) {
       return {
         safe: false,

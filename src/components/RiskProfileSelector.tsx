@@ -1,6 +1,6 @@
 /**
  * RiskProfileSelector Component
- * UI for selecting user's desired risk profile with save functionality
+ * UI for selecting user's desired risk profile with comprehensive sync functionality
  */
 
 'use client';
@@ -8,8 +8,9 @@
 import React, { useState, useEffect } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { Shield, TrendingUp, Zap, CheckCircle, Loader2, AlertCircle, Save } from 'lucide-react';
+import { useRiskProfileSync } from '@/hooks/useRiskProfileSync';
 
-export type RiskProfile = 'Conservative' | 'Balanced' | 'Aggressive';
+export type RiskProfile = 'conservative' | 'moderate' | 'aggressive';
 
 interface UserSettings {
   walletAddress: string;
@@ -36,21 +37,28 @@ interface RiskProfileOption {
 export function RiskProfileSelector() {
   const { publicKey } = useWallet();
   
-  // State management
-  const [currentSettings, setCurrentSettings] = useState<UserSettings | null>(null);
-  const [selectedProfile, setSelectedProfile] = useState<RiskProfile>('Balanced');
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-
   // Only use real wallet address when connected
   const effectivePublicKey = publicKey?.toString();
+  
+  // Use comprehensive sync hook instead of local state
+  const { 
+    riskProfileData, 
+    isLoading, 
+    error, 
+    syncRiskProfile,
+    refreshRiskProfile,
+    isInSync
+  } = useRiskProfileSync(effectivePublicKey);
+
+  // State management
+  const [selectedProfile, setSelectedProfile] = useState<RiskProfile>('moderate');
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   // Risk profile options
   const riskProfiles: RiskProfileOption[] = [
     {
-      id: 'Conservative',
+      id: 'conservative',
       name: 'Conservative',
       description: 'Lower risk, steady growth approach',
       icon: <Shield className="h-5 w-5" />,
@@ -65,8 +73,8 @@ export function RiskProfileSelector() {
       expectedReturn: '15-30% annually'
     },
     {
-      id: 'Balanced',
-      name: 'Balanced',
+      id: 'moderate',
+      name: 'Moderate',
       description: 'Moderate risk with balanced growth potential',
       icon: <TrendingUp className="h-5 w-5" />,
       details: [
@@ -80,7 +88,7 @@ export function RiskProfileSelector() {
       expectedReturn: '25-50% annually'
     },
     {
-      id: 'Aggressive',
+      id: 'aggressive',
       name: 'Aggressive',
       description: 'Higher risk for maximum growth potential',
       icon: <Zap className="h-5 w-5" />,
@@ -96,50 +104,12 @@ export function RiskProfileSelector() {
     }
   ];
 
-  // Fetch current settings on mount
+  // Update selected profile when risk profile data changes
   useEffect(() => {
-    const fetchSettings = async () => {
-      if (!effectivePublicKey) return;
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        console.log('📊 Fetching user settings...');
-        
-        const response = await fetch(`/api/user/settings?walletAddress=${effectivePublicKey}`);
-        
-        if (!response.ok) {
-          throw new Error(`Failed to fetch settings: ${response.statusText}`);
-        }
-
-        const result = await response.json();
-        
-        if (!result.success) {
-          throw new Error(result.error || 'Failed to fetch settings');
-        }
-
-        if (result.data === null) {
-          // No saved settings - user is new, use defaults but allow saving
-          console.log('🆕 No saved settings found - using defaults (user can save any selection)');
-          setCurrentSettings(null); // This will allow any selection to be saved
-          setSelectedProfile('Balanced'); // Default selection
-        } else {
-          setCurrentSettings(result.data);
-          setSelectedProfile(result.data.riskProfile);
-          console.log('✅ Settings loaded:', result.data.riskProfile);
-        }
-
-      } catch (err) {
-        console.error('❌ Settings fetch failed:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load settings');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchSettings();
-  }, [effectivePublicKey]);
+    if (riskProfileData?.riskProfile) {
+      setSelectedProfile(riskProfileData.riskProfile);
+    }
+  }, [riskProfileData]);
 
   // Handle profile selection
   const handleProfileSelect = (profile: RiskProfile) => {
@@ -147,60 +117,51 @@ export function RiskProfileSelector() {
     setSaveSuccess(false); // Reset success state when making changes
   };
 
-  // Handle save settings
+  // Handle save settings with comprehensive sync
   const handleSave = async () => {
-    // Allow saving if: 1) No current settings (new user), or 2) Settings have changed
-    if (currentSettings && selectedProfile === currentSettings.riskProfile) return;
+    // Allow saving if settings have changed
+    if (riskProfileData?.riskProfile === selectedProfile) return;
 
     setSaving(true);
-    setError(null);
     setSaveSuccess(false);
 
     try {
-      console.log('💾 Saving risk profile:', selectedProfile);
+      console.log('💾 Saving risk profile with comprehensive sync:', selectedProfile);
       
-      const response = await fetch('/api/user/settings', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          walletAddress: effectivePublicKey,
-          settings: {
-            riskProfile: selectedProfile
-          }
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to save settings: ${response.statusText}`);
-      }
-
-      const result = await response.json();
+      // Use comprehensive sync instead of just frontend API
+      const success = await syncRiskProfile(selectedProfile, riskProfileData?.investmentAmount);
       
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to save settings');
+      if (success) {
+        setSaveSuccess(true);
+        console.log('✅ Risk profile sync completed successfully');
+
+        // Trigger storage event to notify other components
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new StorageEvent('storage', {
+            key: 'xorj_risk_profile_updated',
+            newValue: Date.now().toString(),
+            storageArea: localStorage
+          }));
+        }
+
+        // Clear success message after 3 seconds
+        setTimeout(() => setSaveSuccess(false), 3000);
+      } else {
+        throw new Error('Risk profile sync failed');
       }
-
-      setCurrentSettings(result.data);
-      setSaveSuccess(true);
-      console.log('✅ Settings saved successfully');
-
-      // Clear success message after 3 seconds
-      setTimeout(() => setSaveSuccess(false), 3000);
 
     } catch (err) {
-      console.error('❌ Settings save failed:', err);
-      setError(err instanceof Error ? err.message : 'Failed to save settings');
+      console.error('❌ Risk profile save failed:', err);
+      // Error is handled by the sync hook
     } finally {
       setSaving(false);
     }
   };
 
-  // Check if settings have changed (or if this is a new user with no saved settings)
-  const hasChanges = !currentSettings || selectedProfile !== currentSettings.riskProfile;
+  // Check if settings have changed
+  const hasChanges = !riskProfileData || selectedProfile !== riskProfileData.riskProfile;
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl p-6">
         <div className="animate-pulse">
@@ -219,9 +180,21 @@ export function RiskProfileSelector() {
     <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl p-6">
       <div className="mb-6">
         <h2 className="text-xl font-semibold text-white mb-2">Risk Profile Configuration</h2>
-        <p className="text-gray-300 text-sm">
+        <p className="text-gray-300 text-sm mb-3">
           Choose your preferred risk level to customize how our trading bot manages your investments
         </p>
+        
+        {/* Sync Status Indicator */}
+        {riskProfileData && (
+          <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
+            isInSync 
+              ? 'bg-green-500/10 border border-green-500/20 text-green-400' 
+              : 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-400'
+          }`}>
+            <div className={`w-2 h-2 rounded-full ${isInSync ? 'bg-green-400' : 'bg-yellow-400'}`} />
+            {isInSync ? 'Synced with trading bot' : 'Sync with trading bot needed'}
+          </div>
+        )}
       </div>
 
       {/* Error State */}
@@ -254,7 +227,7 @@ export function RiskProfileSelector() {
       <div className="space-y-4 mb-6">
         {riskProfiles.map((profile) => {
           const isSelected = selectedProfile === profile.id;
-          const isCurrent = currentSettings?.riskProfile === profile.id;
+          const isCurrent = riskProfileData?.riskProfile === profile.id;
           
           return (
             <div

@@ -326,15 +326,16 @@ const XORJLandingPage = () => {
   const submitEmailToSupabase = async (emailAddress: string) => {
     console.log('🚀 SUBMITTING TO PRODUCTION SUPABASE');
     
-    const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://yywoynugnrkvpunnvvla.supabase.co';
-    const SERVICE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_vOrBqwqUab_Bk6xq4w4aUw_VkyIFlr9';
+    const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const SERVICE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     
-    if (!SUPABASE_URL || SUPABASE_URL.startsWith('sb_')) {
-      throw new Error('Invalid Supabase URL configuration');
+    if (!SUPABASE_URL || !SERVICE_KEY) {
+      throw new Error('Supabase configuration missing. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables.');
     }
     
-    console.log('Debug - SUPABASE_URL:', SUPABASE_URL);
-    console.log('Debug - SERVICE_KEY:', SERVICE_KEY ? 'Present' : 'Missing');
+    if (SUPABASE_URL.startsWith('sb_')) {
+      throw new Error('Invalid Supabase URL configuration');
+    }
     
     const response = await fetch(`${SUPABASE_URL}/rest/v1/waitlist_signups`, {
       method: 'POST',

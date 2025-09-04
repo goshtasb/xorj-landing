@@ -113,57 +113,334 @@ export async function GET(request: NextRequest) {
 // --- Data Fetching & Transformation ---
 
 /**
- * Fetches and processes real performance data from the bot service.
+ * Fetches and processes real performance data from mainnet and bot service.
  */
 async function fetchRealPerformance(walletAddress: string, timeRange: '30D' | '90D' | 'ALL'): Promise<PerformanceData | null> {
   try {
-    // FIX (NFR-1): Add { cache: 'no-store' } to prevent server-side caching.
-    const response = await fetch(`http://localhost:8000/api/v1/bot/status/${walletAddress}`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-      cache: 'no-store',
-    });
-
-    if (!response.ok) {
-      console.error(`Bot performance API returned non-OK status: ${response.status} for ${walletAddress}`);
-      return null;
-    }
-
-    const botData = await response.json();
-    if (!botData.performance) {
-      return null; // No performance data is a valid state.
-    }
-
-    // For now, since historical data isn't available yet, create basic chart data from current metrics
-    // This will be replaced with real historical data when the bot service provides it
-    const currentValue = botData.performance.total_volume_usd || 125000;
-    const chartData: ChartDataPoint[] = [];
+    console.log(`🌐 Fetching real mainnet performance data for ${walletAddress}`);
     
-    // Generate simple chart data showing progression to current value
-    const days = timeRange === '30D' ? 30 : timeRange === '90D' ? 90 : 365;
-    for (let i = 0; i < days; i++) {
-      chartData.push({
-        timestamp: Date.now() - (days - i) * 24 * 60 * 60 * 1000,
-        value: currentValue + (Math.sin(i / 10) * currentValue * 0.1),
-      });
-    }
-
+    // Get current wallet balance from mainnet
+    const currentValue = await fetchWalletBalance(walletAddress);
+    
+    // Get transaction history for calculations
+    const transactionHistory = await fetchTransactionHistory(walletAddress);
+    
+    // Get bot service data if available
+    const botServiceData = await fetchBotServiceData(walletAddress);
+    
+    // Calculate performance metrics using real data
+    const performanceMetrics = calculatePerformanceMetrics(
+      transactionHistory, 
+      currentValue, 
+      timeRange,
+      await fetchUserInvestmentAmount(walletAddress)
+    );
+    
+    // Generate chart data from real transaction history
+    const chartData = generateChartData(transactionHistory, currentValue, timeRange);
+    
+    console.log(`✅ LIVE PERFORMANCE: ROI: ${performanceMetrics.netROI.toFixed(2)}%, Trades: ${performanceMetrics.totalTrades}, Win Rate: ${performanceMetrics.winRate.toFixed(1)}%`);
+    
     return {
-      currentVaultValueUSD: parseFloat((botData.performance.total_volume_usd || 0).toString()),
-      netROI: 0, // Not available in current bot service response
-      maxDrawdownPercent: 0, // Not available in current bot service response  
+      currentVaultValueUSD: currentValue,
+      netROI: performanceMetrics.netROI,
+      maxDrawdownPercent: performanceMetrics.maxDrawdown,
       chartData,
-      totalTrades: parseInt((botData.performance.total_trades || 0).toString(), 10),
-      winRate: parseFloat((botData.performance.success_rate || 0).toString()),
-      sharpeRatio: 0, // Not available in current bot service response
+      totalTrades: performanceMetrics.totalTrades,
+      winRate: performanceMetrics.winRate,
+      sharpeRatio: performanceMetrics.sharpeRatio,
       timeRange,
       lastUpdated: Date.now(),
     };
 
-  } catch {
-    console.error(`Bot performance API connection failed for ${walletAddress}:`);
+  } catch (error) {
+    console.error(`❌ Failed to fetch real performance data for ${walletAddress}:`, error);
     return null;
   }
+}
+
+/**
+ * Fetch current wallet balance from Solana mainnet
+ */
+async function fetchWalletBalance(walletAddress: string): Promise<number> {
+  try {
+    const response = await fetch('https://api.mainnet-beta.solana.com', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getBalance',
+        params: [walletAddress]
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Solana RPC returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (data.error) {
+      throw new Error(`Solana RPC error: ${data.error.message}`);
+    }
+
+    const lamports = data.result?.value || 0;
+    const solBalance = lamports / 1e9; // Convert lamports to SOL
+    
+    // Get SOL price for USD conversion
+    const solPriceResponse = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd', {
+      cache: 'no-store'
+    });
+    
+    let solPriceUSD = 150; // Fallback price
+    if (solPriceResponse.ok) {
+      const priceData = await solPriceResponse.json();
+      solPriceUSD = priceData.solana?.usd || 150;
+    }
+    
+    const usdValue = solBalance * solPriceUSD;
+    console.log(`💰 MAINNET BALANCE: ${solBalance.toFixed(4)} SOL ($${usdValue.toFixed(2)} USD) for ${walletAddress}`);
+    
+    return usdValue;
+    
+  } catch (error) {
+    console.warn(`⚠️ Failed to fetch wallet balance, using investment amount fallback:`, error);
+    return await fetchUserInvestmentAmount(walletAddress);
+  }
+}
+
+/**
+ * Interface for trade transaction data
+ */
+interface TradeTransaction {
+  id: string;
+  user_vault_address: string;
+  client_order_id: string;
+  status: string;
+  from_token_address?: string;
+  to_token_address?: string;
+  amount_in?: number;
+  amount_out?: number;
+  expected_amount_out?: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+/**
+ * Fetch transaction history from mainnet and database
+ */
+async function fetchTransactionHistory(walletAddress: string): Promise<TradeTransaction[]> {
+  try {
+    // Get trades from database
+    const { TradeService } = await import('@/lib/botStateService');
+    const tradesResult = await TradeService.getAll({
+      user_vault_address: walletAddress,
+      limit: 1000,
+      orderBy: 'created_at',
+      orderDirection: 'DESC'
+    });
+    
+    if (tradesResult.success && tradesResult.data) {
+      console.log(`📊 Found ${tradesResult.data.length} trades in database for ${walletAddress}`);
+      return tradesResult.data;
+    }
+    
+    return [];
+  } catch (error) {
+    console.warn(`⚠️ Failed to fetch transaction history:`, error);
+    return [];
+  }
+}
+
+/**
+ * Interface for bot service data response
+ */
+interface BotServiceData {
+  health_score?: number;
+  performance?: {
+    total_trades: number;
+    successful_trades: number;
+    total_pnl: number;
+  };
+  last_execution?: string;
+}
+
+/**
+ * Fetch bot service data if available
+ */
+async function fetchBotServiceData(walletAddress: string): Promise<BotServiceData | null> {
+  try {
+    const BOT_SERVICE_API_KEY = process.env.BOT_SERVICE_API_KEY;
+    if (!BOT_SERVICE_API_KEY) {
+      return null;
+    }
+    
+    const response = await fetch(`http://localhost:8001/api/v1/bot/status/${walletAddress}`, {
+      method: 'GET',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${BOT_SERVICE_API_KEY}`
+      },
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      console.log(`🔍 Bot service not available (${response.status})`);
+      return null;
+    }
+
+    const botData = await response.json();
+    console.log(`✅ Bot service data retrieved for ${walletAddress}`);
+    return botData;
+    
+  } catch (error) {
+    console.log(`🔍 Bot service connection failed (expected):`, error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
+/**
+ * Calculate real performance metrics from transaction data
+ */
+function calculatePerformanceMetrics(transactions: TradeTransaction[], currentValue: number, timeRange: string, investmentAmount: number) {
+  if (transactions.length === 0) {
+    return {
+      netROI: investmentAmount > 0 ? ((currentValue - investmentAmount) / investmentAmount) * 100 : 0,
+      maxDrawdown: 0,
+      totalTrades: 0,
+      winRate: 0,
+      sharpeRatio: 0
+    };
+  }
+  
+  // Calculate total P&L from trades
+  const completedTrades = transactions.filter(t => t.status === 'CONFIRMED');
+  const totalPnL = completedTrades.reduce((sum, trade) => {
+    const amountIn = parseFloat(trade.amount_in || '0');
+    const amountOut = parseFloat(trade.actual_amount_out || trade.expected_amount_out || '0');
+    return sum + (amountOut - amountIn);
+  }, 0);
+  
+  // Calculate ROI
+  const baseline = investmentAmount > 0 ? investmentAmount : Math.abs(totalPnL) + currentValue;
+  const netROI = baseline > 0 ? ((currentValue + totalPnL - baseline) / baseline) * 100 : 0;
+  
+  // Calculate win rate
+  const winningTrades = completedTrades.filter(trade => {
+    const amountIn = parseFloat(trade.amount_in || '0');
+    const amountOut = parseFloat(trade.actual_amount_out || trade.expected_amount_out || '0');
+    return amountOut > amountIn;
+  });
+  const winRate = completedTrades.length > 0 ? (winningTrades.length / completedTrades.length) * 100 : 0;
+  
+  // Calculate max drawdown (simplified)
+  let runningPnL = 0;
+  let peak = 0;
+  let maxDrawdown = 0;
+  
+  for (const trade of completedTrades.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())) {
+    const amountIn = parseFloat(trade.amount_in || '0');
+    const amountOut = parseFloat(trade.actual_amount_out || trade.expected_amount_out || '0');
+    runningPnL += (amountOut - amountIn);
+    
+    if (runningPnL > peak) peak = runningPnL;
+    
+    const currentDrawdown = peak - runningPnL;
+    if (currentDrawdown > maxDrawdown) maxDrawdown = currentDrawdown;
+  }
+  
+  const maxDrawdownPercent = peak > 0 ? (maxDrawdown / peak) * 100 : 0;
+  
+  // Calculate simple Sharpe ratio
+  const returns = completedTrades.map(trade => {
+    const amountIn = parseFloat(trade.amount_in || '0');
+    const amountOut = parseFloat(trade.actual_amount_out || trade.expected_amount_out || '0');
+    return amountIn > 0 ? ((amountOut - amountIn) / amountIn) : 0;
+  });
+  
+  let sharpeRatio = 0;
+  if (returns.length > 1) {
+    const avgReturn = returns.reduce((sum, ret) => sum + ret, 0) / returns.length;
+    const variance = returns.reduce((sum, ret) => sum + Math.pow(ret - avgReturn, 2), 0) / (returns.length - 1);
+    const stdDev = Math.sqrt(variance);
+    sharpeRatio = stdDev > 0 ? avgReturn / stdDev : 0;
+  }
+  
+  return {
+    netROI,
+    maxDrawdown: maxDrawdownPercent,
+    totalTrades: transactions.length,
+    winRate,
+    sharpeRatio
+  };
+}
+
+/**
+ * Generate chart data from transaction history
+ */
+function generateChartData(transactions: TradeTransaction[], currentValue: number, timeRange: string): ChartDataPoint[] {
+  const days = timeRange === '30D' ? 30 : timeRange === '90D' ? 90 : 365;
+  const startTime = Date.now() - (days * 24 * 60 * 60 * 1000);
+  
+  if (transactions.length === 0) {
+    // No transactions - show flat line at current value
+    const chartData: ChartDataPoint[] = [];
+    for (let i = 0; i < Math.min(days, 7); i++) {
+      chartData.push({
+        timestamp: startTime + (i * 24 * 60 * 60 * 1000),
+        value: currentValue
+      });
+    }
+    return chartData;
+  }
+  
+  // Group transactions by day and calculate cumulative value
+  const dailyValues = new Map<string, number>();
+  
+  // Sort transactions by date (oldest first)
+  const sortedTransactions = transactions
+    .filter(t => new Date(t.created_at).getTime() >= startTime)
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+  
+  // Calculate daily values
+  for (const trade of sortedTransactions) {
+    const date = new Date(trade.created_at);
+    const dayKey = date.toISOString().split('T')[0];
+    
+    const amountIn = parseFloat(trade.amount_in || '0');
+    const amountOut = parseFloat(trade.actual_amount_out || trade.expected_amount_out || '0');
+    const tradePnL = amountOut - amountIn;
+    
+    if (dailyValues.has(dayKey)) {
+      dailyValues.set(dayKey, dailyValues.get(dayKey)! + tradePnL);
+    } else {
+      dailyValues.set(dayKey, tradePnL);
+    }
+  }
+  
+  // Create chart data points
+  const chartData: ChartDataPoint[] = [];
+  let runningValue = currentValue - Array.from(dailyValues.values()).reduce((sum, val) => sum + val, 0);
+  
+  // Fill in data points for the time range
+  for (let i = 0; i < days; i++) {
+    const date = new Date(startTime + (i * 24 * 60 * 60 * 1000));
+    const dayKey = date.toISOString().split('T')[0];
+    
+    if (dailyValues.has(dayKey)) {
+      runningValue += dailyValues.get(dayKey)!;
+    }
+    
+    chartData.push({
+      timestamp: date.getTime(),
+      value: runningValue
+    });
+  }
+  
+  return chartData;
 }
 
 /**
@@ -171,47 +448,61 @@ async function fetchRealPerformance(walletAddress: string, timeRange: '30D' | '9
  */
 async function fetchUserInvestmentAmount(walletAddress: string): Promise<number> {
   try {
-    // TODO: Replace with direct database query when database integration is complete
-    // For now, check localStorage-style mock data or return default
+    const { UserSettingsService } = await import('@/lib/userSettingsService');
     
-    // In a real implementation, this would be:
-    // const userSettings = await db.userSettings.findFirst({ where: { walletAddress } });
-    // return userSettings?.investmentAmount || 1000;
+    console.log(`📊 Fetching investment amount for ${walletAddress} from database`);
+    const userSettings = await UserSettingsService.getUserSettings(walletAddress);
     
-    console.log(`📊 Fetching investment amount for ${walletAddress} - using default for now`);
-    return 1000; // Default investment amount
-  } catch {
-    console.error('Error fetching investment amount:');
-    return 1000; // Default fallback
+    if (userSettings?.investmentAmount) {
+      console.log(`✅ Found investment amount: $${userSettings.investmentAmount}`);
+      return userSettings.investmentAmount;
+    }
+    
+    console.log(`⚠️ No investment amount found for ${walletAddress}, using default: $0`);
+    return 0; // Default investment amount - $0 until user sets amount
+  } catch (error) {
+    console.error('Error fetching investment amount:', error);
+    return 0; // Default fallback - $0 until user sets amount
   }
 }
 
 /**
- * Generates zero/empty performance data for users with no trading history yet.
+ * LIVE DATA: Returns actual performance data for users, no mock/simulation.
+ * This function now only returns live mainnet data.
  */
 async function generateMockPerformance(walletAddress: string, timeRange: '30D' | '90D' | 'ALL'): Promise<PerformanceData> {
-  const days = timeRange === '30D' ? 30 : timeRange === '90D' ? 90 : 365;
-  const chartData: ChartDataPoint[] = [];
-
-  // Get user's investment amount for proper baseline
+  console.log(`🚀 LIVE DATA: Generating real performance data for ${walletAddress} (no mock data)`);
+  
+  // Get user's current wallet balance from mainnet
+  const currentBalance = await fetchWalletBalance(walletAddress);
+  
+  // Get user's investment amount from database
   const userInvestmentAmount = await fetchUserInvestmentAmount(walletAddress);
-
-  // Create empty chart data - all zeros to show no trading activity
-  for (let i = 0; i < days; i++) {
-    chartData.push({
-      timestamp: Date.now() - (days - i) * 24 * 60 * 60 * 1000,
-      value: userInvestmentAmount, // Start with investment amount, no gains/losses yet
-    });
-  }
-
+  
+  // Get transaction history
+  const transactionHistory = await fetchTransactionHistory(walletAddress);
+  
+  // Calculate real performance metrics
+  const performanceMetrics = calculatePerformanceMetrics(
+    transactionHistory, 
+    currentBalance, 
+    timeRange,
+    userInvestmentAmount
+  );
+  
+  // Generate chart data from real transactions
+  const chartData = generateChartData(transactionHistory, currentBalance, timeRange);
+  
+  console.log(`✅ LIVE DATA: Real performance calculated - Current: $${currentBalance.toFixed(2)}, ROI: ${performanceMetrics.netROI.toFixed(2)}%`);
+  
   return {
-    currentVaultValueUSD: userInvestmentAmount, // Current value equals investment (no trading yet)
-    netROI: 0, // No return yet
-    maxDrawdownPercent: 0, // No losses yet
-    chartData,
-    totalTrades: 0,
-    winRate: 0,
-    sharpeRatio: 0,
+    currentVaultValueUSD: currentBalance, // Real mainnet balance
+    netROI: performanceMetrics.netROI, // Calculated from real data
+    maxDrawdownPercent: performanceMetrics.maxDrawdown, // Calculated from real data
+    chartData, // Based on real transaction history
+    totalTrades: performanceMetrics.totalTrades, // Actual trade count
+    winRate: performanceMetrics.winRate, // Calculated from real trades
+    sharpeRatio: performanceMetrics.sharpeRatio, // Calculated from real returns
     timeRange,
     lastUpdated: Date.now(),
   };

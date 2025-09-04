@@ -10,7 +10,10 @@ import { useWallet } from '@solana/wallet-adapter-react';
 import { useSimpleWallet } from '@/contexts/SimpleWalletContext';
 import { useBotStatus } from '@/contexts/BotStatusContext';
 import { Activity, Power, AlertTriangle, Settings, RefreshCw, Play, Pause, DollarSign } from 'lucide-react';
-import { botService, authenticateWithWallet, isAuthenticated, enableBot, disableBot, executeEmergencyAction, updateInvestmentAmount } from '@/lib/botService';
+import { BotActivityIndicator } from './BotActivityIndicator';
+import { updateInvestmentAmount } from '@/lib/botService';
+import { TokenManager } from '@/lib/tokenManager';
+import { useRiskProfileSync } from '@/hooks/useRiskProfileSync';
 
 interface UserSettings {
   walletAddress: string;
@@ -24,55 +27,46 @@ interface UserSettings {
   createdAt: number;
 }
 
-interface BotStatus {
-  status: 'active' | 'paused' | 'stopped' | 'error';
-  uptime?: number;
-  lastTradeTime?: number;
-  last_execution?: string;
-  configuration?: {
-    risk_profile?: 'low' | 'medium' | 'high' | 'balanced' | 'conservative' | 'aggressive';
-    riskTolerance?: 'low' | 'medium' | 'high';
-    maxPositionSize?: number;
-    max_trade_amount?: number;
-    autoRebalance?: boolean;
-    enabled?: boolean;
-  };
-  performance?: {
-    total_trades?: number;
-    successful_trades?: number;
-    success_rate?: number;
-  };
-}
+// Bot status interface is provided by BotStatusContext
 
 export function BotControlsCard() {
   const { publicKey } = useWallet();
   const { connected, authenticated } = useSimpleWallet();
   const { botStatus, isLoading: botStatusLoading, error: botStatusError, fetchBotStatus, setBotEnabled } = useBotStatus();
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
-  const [loading, setLoading] = useState(false);
   const [toggleLoading, setToggleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
-  const [authenticationLoading, setAuthenticationLoading] = useState(false);
-  const [investmentAmount, setInvestmentAmount] = useState<string>('1000');
+  // Note: authenticationLoading state removed as authentication is now handled by SimpleWalletContext
+  const [investmentAmount, setInvestmentAmount] = useState<string>('0');
   const [savingInvestmentAmount, setSavingInvestmentAmount] = useState(false);
+  const [isEditingInvestmentAmount, setIsEditingInvestmentAmount] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number>(0);
   const [loadingBalance, setLoadingBalance] = useState(false);
   const [balanceError, setBalanceError] = useState<string | null>(null);
+
+  // PERMANENT SOLUTION: Use synchronized risk profile hook
+  const effectivePublicKey = mounted ? publicKey?.toString() : undefined;
+  const { 
+    riskProfileData, 
+    isLoading: riskProfileLoading, 
+    error: riskProfileError,
+    syncRiskProfile,
+    isInSync
+  } = useRiskProfileSync(effectivePublicKey);
 
   // Ensure component is mounted before accessing wallet
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const effectivePublicKey = mounted ? publicKey?.toString() : undefined;
   // More flexible wallet detection - if we have a public key, consider it ready
   const isWalletReady = mounted && effectivePublicKey && (connected || !!publicKey);
   
   // Debug logging
   useEffect(() => {
     if (mounted) {
-      console.log('🔍 BotControls Debug:', {
+      console.log('BotControlsCard state:', {
         mounted,
         publicKey: effectivePublicKey,
         connected,
@@ -82,67 +76,8 @@ export function BotControlsCard() {
     }
   }, [mounted, effectivePublicKey, connected, authenticated, isWalletReady]);
 
-  // Authenticate user if needed - now using Next.js API directly
-  const ensureAuthentication = useCallback(async () => {
-    if (!isWalletReady) return false;
-    
-    // Check if already authenticated
-    if (authenticated && isAuthenticated()) {
-      return true;
-    }
-    
-    // Prevent too many authentication attempts
-    const lastAttempt = localStorage.getItem('xorj_last_auth_attempt');
-    const now = Date.now();
-    if (lastAttempt && (now - parseInt(lastAttempt)) < 30000) { // 30 second cooldown
-      console.log('⏳ Authentication cooldown active, skipping attempt');
-      return false;
-    }
-    localStorage.setItem('xorj_last_auth_attempt', now.toString());
-    
-    // Need to authenticate - call Next.js API directly instead of botService
-    setAuthenticationLoading(true);
-    try {
-      console.log('🔐 Authenticating directly with Next.js API...', effectivePublicKey);
-      
-      const response = await fetch('/api/auth/authenticate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          wallet_address: effectivePublicKey,
-          signature: 'YXV0aGVudGljYXRlZF92aWFfd2FsbGV0X2FkYXB0ZXI=', // base64 encoded 'authenticated_via_wallet_adapter'
-          message: 'XORJ Bot Authentication'
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Authentication failed: ${response.status} ${response.statusText}`);
-      }
-
-      const authResult = await response.json();
-      if (!authResult.success) {
-        throw new Error(authResult.error || 'Authentication failed');
-      }
-
-      // Store session token and sync with botService
-      if (authResult.session_token && typeof window !== 'undefined') {
-        localStorage.setItem('xorj_session_token', authResult.session_token);
-        // Force botService to reload the session token
-        botService.reloadSessionToken();
-      }
-
-      console.log('✅ Direct API authentication successful');
-      return true;
-    } catch (error) {
-      console.error('❌ Direct API authentication failed:', error);
-      setError('Authentication failed. Please try reconnecting your wallet.');
-      return false;
-    } finally {
-      setAuthenticationLoading(false);
-    }
-  }, [isWalletReady, authenticated, effectivePublicKey]);
+  // Note: This function was previously used for authentication but is now deprecated
+  // Authentication is handled by SimpleWalletContext automatically
 
   // Bot status is now managed by BotStatusContext, removed local fetch function
 
@@ -152,6 +87,8 @@ export function BotControlsCard() {
 
     const isCurrentlyActive = botStatus.status === 'active';
     const actionName = isCurrentlyActive ? 'disable' : 'enable';
+
+    // Authentication is handled by httpOnly cookies - no need to check localStorage tokens
     
     // If enabling bot, validate wallet balance
     if (!isCurrentlyActive) {
@@ -184,13 +121,25 @@ export function BotControlsCard() {
     setError(null);
     
     try {
-      console.log(`🤖 ${actionName === 'disable' ? 'Disabling' : 'Enabling'} bot...`);
       
-      // Use the new specific enable/disable endpoints
-      const result = isCurrentlyActive ? await disableBot() : await enableBot();
+      // Use direct API calls with httpOnly cookies
+      const endpoint = isCurrentlyActive ? '/api/bot/disable' : '/api/bot/enable';
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include' // Include httpOnly cookies for authentication
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Bot ${actionName} failed: ${response.status}`);
+      }
+      
+      const result = await response.json();
       
       if (result.success) {
-        console.log(`✅ Bot ${actionName} successful: ${result.message}`);
         
         // Update bot status immediately via shared context
         setBotEnabled(!isCurrentlyActive);
@@ -201,12 +150,42 @@ export function BotControlsCard() {
         }, 1000);
         
       } else {
-        throw new Error(result.message || `Failed to ${actionName} bot`);
+        const errorMsg = result.message || 'Failed to toggle bot';
+        throw new Error(errorMsg);
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : `Unknown error during bot ${actionName}`;
-      console.error(`❌ Bot ${actionName} error:`, errorMessage);
-      setError(errorMessage);
+      console.log('Bot toggle error occurred:', err);
+      
+      // Simplified error handling without string operations that might fail
+      let errorMessage = 'Failed to toggle bot';
+      
+      try {
+        if (err instanceof Error && err.message) {
+          errorMessage = err.message;
+        }
+      } catch (nestedErr) {
+        console.log('Error processing error message:', nestedErr);
+      }
+      
+      // Simple authentication check without complex string operations
+      const isAuthError = errorMessage === 'No session token available. Please authenticate first.' || 
+                         errorMessage.indexOf('authentication') !== -1 ||
+                         errorMessage.indexOf('session') !== -1;
+      
+      if (isAuthError) {
+        console.log('Authentication issue detected, clearing tokens...');
+        try {
+          TokenManager.clearTokens();
+        } catch (tokenErr) {
+          console.log('Error clearing tokens:', tokenErr);
+        }
+        setError('Session expired. Please refresh the page to re-authenticate.');
+        setTimeout(() => {
+          window.location.reload();
+        }, 3000);
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setToggleLoading(false);
     }
@@ -220,7 +199,6 @@ export function BotControlsCard() {
     setBalanceError(null);
 
     try {
-      console.log(`💰 Fetching wallet balance for: ${effectivePublicKey}`);
       
       // Use server-side API endpoint instead of direct service call to avoid CORS issues
       const response = await fetch(`/api/wallet/balance?walletAddress=${effectivePublicKey}`, {
@@ -235,10 +213,15 @@ export function BotControlsCard() {
       }
 
       const data = await response.json();
-      const balance = data.balance?.usd || 0;
       
-      setWalletBalance(balance);
-      console.log(`✅ Wallet balance fetched: $${balance.toLocaleString()}`);
+      if (data.success && data.data) {
+        const balance = data.data.totalUsdValue || 0;
+        setWalletBalance(balance);
+        console.log('✅ Live wallet balance updated:', balance);
+      } else {
+        console.error('❌ Invalid balance API response structure:', data);
+        setWalletBalance(0);
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to fetch wallet balance';
       console.error('❌ Wallet balance fetch error:', errorMessage);
@@ -254,7 +237,7 @@ export function BotControlsCard() {
     
     const amount = parseFloat(investmentAmount);
     if (isNaN(amount) || amount <= 0) {
-      setError('Please enter a valid investment amount greater than 0');
+      setError('Please enter a valid investment amount (minimum $0.01)');
       return;
     }
 
@@ -273,14 +256,13 @@ export function BotControlsCard() {
     setError(null);
 
     try {
-      console.log(`💰 Saving investment amount: $${amount}`);
       
       const response = await fetch('/api/user/settings', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('xorj_session_token') || localStorage.getItem('xorj_jwt_token') || ''}`
         },
+        credentials: 'include', // Include httpOnly cookies for authentication
         body: JSON.stringify({
           walletAddress: effectivePublicKey,
           investmentAmount: amount
@@ -296,22 +278,40 @@ export function BotControlsCard() {
         throw new Error(result.error || 'Failed to save investment amount');
       }
 
-      console.log('✅ Investment amount saved successfully');
       
-      // Also sync with bot service to update max_trade_amount
+      // PERMANENT SOLUTION: Use comprehensive sync instead of just bot service
       try {
-        const botSyncResult = await updateInvestmentAmount(amount);
-        if (botSyncResult.success) {
-          console.log('✅ Investment amount synced with bot service');
+        if (riskProfileData?.riskProfile) {
+          const syncSuccess = await syncRiskProfile(riskProfileData.riskProfile, amount);
+          if (syncSuccess) {
+            console.log('✅ Complete risk profile and investment amount sync successful');
+          } else {
+            console.warn('⚠️ Risk profile sync had issues, but user settings saved');
+          }
         } else {
-          console.warn('⚠️ Failed to sync investment amount with bot service:', botSyncResult.message);
+          // Fallback to old method if risk profile data not available
+          const botSyncResult = await updateInvestmentAmount(amount);
+          if (botSyncResult.success) {
+            console.log('✅ Bot investment amount synced successfully (fallback method)');
+          }
         }
-      } catch (botSyncError) {
-        console.warn('⚠️ Bot service sync error (non-critical):', botSyncError);
+      } catch (syncError) {
+        // Sync failing shouldn't prevent saving user settings
+        console.log('ℹ️ Comprehensive sync had issues, but user settings saved successfully');
       }
       
-      // Refresh user settings to get the updated data
-      await fetchUserSettings();
+      // Update the userSettings state manually to reflect the saved value
+      if (userSettings) {
+        setUserSettings({
+          ...userSettings,
+          investmentAmount: amount,
+          lastUpdated: Date.now()
+        });
+      }
+      
+      // Keep the input field as is since we just successfully saved it
+      setIsEditingInvestmentAmount(false);
+      // Don't call fetchUserSettings here - it will overwrite the input field we just saved
       
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to save investment amount';
@@ -327,15 +327,27 @@ export function BotControlsCard() {
     if (!isWalletReady) return;
 
     try {
-      console.log('🚨 Executing emergency stop...');
       
-      const result = await executeEmergencyAction({
-        action: 'kill_switch',
-        reason: 'user_requested_emergency_stop'
+      const response = await fetch('/api/bot/emergency', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', // Include httpOnly cookies for authentication
+        body: JSON.stringify({
+          action: 'kill_switch',
+          reason: 'user_requested_emergency_stop'
+        })
       });
       
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Emergency stop failed: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
       if (result.success) {
-        console.log('✅ Emergency stop successful');
         
         // Update bot status immediately via shared context
         setBotEnabled(false);
@@ -368,6 +380,7 @@ export function BotControlsCard() {
         headers: {
           'Content-Type': 'application/json',
         },
+        credentials: 'include', // Include httpOnly cookies for authentication
         cache: 'no-store'
       });
       
@@ -375,9 +388,12 @@ export function BotControlsCard() {
         const data = await response.json();
         if (data.success && data.data) {
           setUserSettings(data.data);
-          // Load investment amount from settings if available
-          if (data.data.investmentAmount) {
+          // Load investment amount from settings only if it's a valid positive number and user is not actively editing
+          if (data.data.investmentAmount && data.data.investmentAmount > 0 && !isEditingInvestmentAmount) {
             setInvestmentAmount(data.data.investmentAmount.toString());
+          } else if (!data.data.investmentAmount && !isEditingInvestmentAmount) {
+            // If no saved amount, ensure we show 0 as default
+            setInvestmentAmount('0');
           }
         }
       } else {
@@ -385,8 +401,9 @@ export function BotControlsCard() {
       }
     } catch (err) {
       console.error('❌ Error fetching user settings:', err);
+      // Don't propagate this error as it's non-critical
     }
-  }, [mounted, effectivePublicKey]);
+  }, [mounted, effectivePublicKey, isEditingInvestmentAmount]);
 
   // Auto-refresh user settings and wallet balance when wallet is connected and authenticated
   useEffect(() => {
@@ -397,8 +414,7 @@ export function BotControlsCard() {
     
     // Set up periodic refresh for user-specific data only (bot status handled by context)
     const interval = setInterval(() => {
-      if (authenticated && connected && effectivePublicKey && mounted) {
-        console.log('🔄 BotControlsCard: Periodic refresh (settings & balance every 5 seconds)');
+      if (authenticated && connected && effectivePublicKey && mounted && !isEditingInvestmentAmount) {
         
         Promise.allSettled([
           fetchUserSettings(),
@@ -407,15 +423,18 @@ export function BotControlsCard() {
           results.forEach((result, index) => {
             if (result.status === 'rejected') {
               const functionNames = ['fetchUserSettings', 'fetchWalletBalance'];
-              console.warn(`⚠️ BotControlsCard ${functionNames[index]} failed:`, result.reason);
+              console.warn(`⚠️ Periodic refresh failed for ${functionNames[index]}:`, result.reason);
             }
           });
+        }).catch(error => {
+          // This should not happen with Promise.allSettled, but adding for safety
+          console.error('❌ Unexpected error in periodic refresh:', error);
         });
       }
-    }, 5000); // 5 seconds - faster refresh for better UX when settings change
+    }, 60000); // Increased to 60 seconds to reduce API load
     
     return () => clearInterval(interval);
-  }, [isWalletReady, authenticated, fetchUserSettings, fetchWalletBalance]);
+  }, [isWalletReady, authenticated, connected, effectivePublicKey, mounted, isEditingInvestmentAmount]); // Removed function dependencies to fix infinite loop
 
   // Note: Authentication is now handled automatically by SimpleWalletContext
   // No need for manual authentication calls here
@@ -450,22 +469,8 @@ export function BotControlsCard() {
     );
   }
 
-  // Show authentication loading state
-  if (authenticationLoading) {
-    return (
-      <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-semibold text-white">XORJ Trading Bot</h2>
-          <RefreshCw className="h-5 w-5 text-blue-400 animate-spin" />
-        </div>
-        <div className="text-center py-8">
-          <RefreshCw className="w-8 h-8 text-blue-400 mx-auto mb-4 animate-spin" />
-          <h3 className="text-lg font-medium text-white mb-2">Authenticating...</h3>
-          <p className="text-gray-300">Securing connection to bot service...</p>
-        </div>
-      </div>
-    );
-  }
+  // Authentication loading is now handled by SimpleWalletContext
+  // This state check is no longer needed
 
   return (
     <div className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-xl p-6">
@@ -519,7 +524,7 @@ export function BotControlsCard() {
                 </div>
                 <button
                   onClick={toggleBot}
-                  disabled={botStatusLoading || authenticationLoading || toggleLoading || botStatus.status === 'error'}
+                  disabled={botStatusLoading || toggleLoading || botStatus.status === 'error'}
                   className={`
                     inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md
                     transition-colors disabled:opacity-50 disabled:cursor-not-allowed
@@ -560,9 +565,22 @@ export function BotControlsCard() {
                 <Settings className="h-4 w-4 text-purple-400" />
                 <span className="text-sm text-gray-300">Risk Level</span>
               </div>
-              <div className="text-lg font-semibold text-white capitalize">
-                {userSettings?.riskProfile || botStatus.configuration?.risk_profile || botStatus.configuration?.riskTolerance || 'Medium'}
+              <div className="flex items-center justify-between">
+                <div className="text-lg font-semibold text-white capitalize">
+                  {riskProfileData?.riskProfile || 'Balanced'}
+                </div>
+                {!isInSync && (
+                  <div className="flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3 text-yellow-400" />
+                    <span className="text-xs text-yellow-400">Sync Issue</span>
+                  </div>
+                )}
               </div>
+              {riskProfileError && (
+                <div className="text-xs text-red-400 mt-1">
+                  Error: {riskProfileError}
+                </div>
+              )}
             </div>
 
             <div className="bg-black/20 rounded-lg p-4">
@@ -574,6 +592,30 @@ export function BotControlsCard() {
                 {botStatus.configuration?.enabled !== false ? 'Yes' : 'No'}
               </div>
             </div>
+          </div>
+
+          {/* Real-time Bot Activity */}
+          <div className={`${
+            botStatus.status === 'active' 
+              ? 'bg-green-500/10 border border-green-500/20' 
+              : 'bg-gray-500/10 border border-gray-500/20'
+          } rounded-lg p-4`}>
+            <div className="flex items-center gap-2 mb-3">
+              <Activity className={`h-4 w-4 ${
+                botStatus.status === 'active' ? 'text-green-400' : 'text-gray-400'
+              }`} />
+              <span className={`text-sm font-medium ${
+                botStatus.status === 'active' ? 'text-green-400' : 'text-gray-400'
+              }`}>
+                {botStatus.status === 'active' ? 'Live Bot Activity' : 'Bot Activity Monitor'}
+              </span>
+            </div>
+            <BotActivityIndicator 
+              walletAddress={effectivePublicKey}
+              refreshInterval={10}
+              showDetailed={true}
+              showLiveActivity={true}
+            />
           </div>
 
           {/* Investment Configuration */}
@@ -656,17 +698,25 @@ export function BotControlsCard() {
                   <input
                     id="investment-amount"
                     type="number"
-                    min="1"
+                    min="0.01"
                     max={Math.max(0, walletBalance * 0.98 - 10)}
                     step="0.01"
                     value={investmentAmount}
-                    onChange={(e) => setInvestmentAmount(e.target.value)}
+                    onChange={(e) => {
+                      setInvestmentAmount(e.target.value);
+                      setIsEditingInvestmentAmount(true);
+                    }}
+                    onFocus={() => setIsEditingInvestmentAmount(true)}
+                    onBlur={() => {
+                      // Reset editing flag after a longer delay to allow save button clicks
+                      setTimeout(() => setIsEditingInvestmentAmount(false), 500);
+                    }}
                     className={`w-full bg-black/40 border rounded-lg px-4 pl-8 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:border-transparent ${
                       parseFloat(investmentAmount) > (walletBalance * 0.98 - 10)
                         ? 'border-red-500 focus:ring-red-500'
                         : 'border-white/20 focus:ring-blue-500'
                     }`}
-                    placeholder="1000.00"
+                    placeholder="0.00"
                     disabled={savingInvestmentAmount}
                   />
                   {parseFloat(investmentAmount) > 0 && parseFloat(investmentAmount) > (walletBalance * 0.98 - 10) && (
@@ -688,7 +738,7 @@ export function BotControlsCard() {
               
               <button
                 onClick={saveInvestmentAmount}
-                disabled={savingInvestmentAmount || !investmentAmount || parseFloat(investmentAmount) <= 0 || parseFloat(investmentAmount) > (walletBalance * 0.98 - 10)}
+                disabled={savingInvestmentAmount || investmentAmount === '' || parseFloat(investmentAmount) <= 0 || parseFloat(investmentAmount) > (walletBalance * 0.98 - 10)}
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
               >
                 {savingInvestmentAmount ? (

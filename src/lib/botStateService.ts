@@ -418,11 +418,14 @@ export class TradeService {
         message: 'Trade created successfully'
       };
     } catch (error: unknown) {
-      console.error('❌ Error creating trade:');
+      console.error('❌ Error creating trade:', error);
+      
+      // Type guard for database errors
+      const dbError = error as { code?: string; constraint?: string; detail?: string };
       
       // CRITICAL: Check for specific PostgreSQL SQLSTATE error code for unique constraint violation
       // SQLSTATE 23505 = unique_violation (PostgreSQL standard, will not change)
-      if (error.code === '23505' && error.constraint === 'trade_idempotency_key') {
+      if (dbError.code === '23505' && (dbError.constraint === 'trades_client_order_id_user_unique' || dbError.constraint?.includes('client_order_id'))) {
         return {
           success: false,
           error: `Duplicate trade prevented: client_order_id ${data.client_order_id} already exists for user ${data.user_vault_address}`,
@@ -431,19 +434,19 @@ export class TradeService {
       }
       
       // Handle other constraint violations with proper SQLSTATE codes
-      if (error.code === '23505') {
+      if (dbError.code === '23505') {
         return {
           success: false,
-          error: `Database constraint violation: ${error.constraint || 'unknown constraint'}`,
+          error: `Database constraint violation: ${dbError.constraint || 'unknown constraint'}`,
           code: 'CONSTRAINT_VIOLATION'
         };
       }
       
       // Handle foreign key violations (SQLSTATE 23503)
-      if (error.code === '23503') {
+      if (dbError.code === '23503') {
         return {
           success: false,
-          error: `Foreign key constraint violation: ${error.detail || 'Invalid reference'}`,
+          error: `Foreign key constraint violation: ${dbError.detail || 'Invalid reference'}`,
           code: 'FOREIGN_KEY_VIOLATION'
         };
       }
@@ -453,6 +456,23 @@ export class TradeService {
         error: 'Unknown error'
       };
     }
+  }
+
+  /**
+   * Helper method to determine symbol from token addresses
+   */
+  private static getSymbolFromTokens(fromToken: string, toToken: string): string {
+    const tokenMap: Record<string, string> = {
+      'So11111111111111111111111111111111111111112': 'SOL',
+      'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v': 'USDC',
+      '4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R': 'RAY',
+      'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263': 'BONK'
+    };
+    
+    const fromSymbol = tokenMap[fromToken] || 'UNK';
+    const toSymbol = tokenMap[toToken] || 'UNK';
+    
+    return `${fromSymbol}/${toSymbol}`;
   }
 
   /**
@@ -758,8 +778,12 @@ export class TradeService {
     const crypto = require('crypto');
     const hash = crypto.createHash('sha256').update(inputString).digest('hex');
     
-    // Use first 32 chars for reasonable length while maintaining uniqueness
-    return `trade_${hash.substring(0, 32)}`;
+    // Format: 8 alphanumeric chars + underscore + timestamp + underscore + 6 alphanumeric chars
+    const prefix = hash.substring(0, 8).toUpperCase();
+    const suffix = hash.substring(8, 14).toUpperCase();
+    const timestamp = timeWindow;
+    
+    return `${prefix}_${timestamp}_${suffix}`;
   }
 
   /**
@@ -774,6 +798,18 @@ export class TradeService {
       data.amount_in
     );
     
+    // First check if a trade with this client_order_id already exists
+    const existingResult = await this.findByClientOrderId(data.user_vault_address, client_order_id);
+    if (existingResult.success && existingResult.data) {
+      // Trade already exists - return it (idempotent behavior)
+      return {
+        success: true,
+        data: existingResult.data,
+        message: 'Trade already exists (idempotent)'
+      };
+    }
+    
+    // Create new trade
     return this.create({
       ...data,
       client_order_id
@@ -782,88 +818,186 @@ export class TradeService {
 }
 
 /**
- * BOT STATE SERVICE
- * Replaces in-memory bot state storage
+ * BOT STATE SERVICE WITH REDIS CACHING
+ * Implements write-through cache invalidation and read-through caching
+ * Following the "Source of Truth First" pattern from the PRD
  */
-export class BotStateService {
+export class BotStateServiceWithCache {
   /**
-   * Get or create bot state for user
+   * Read-through caching pattern (PRD Step 3)
+   * 1. Attempt to read from Redis
+   * 2. If cache miss, read from PostgreSQL
+   * 3. Store PostgreSQL result in Redis with TTL
+   * 4. Return data with cache headers
    */
-  static async getOrCreate(user_id: string): Promise<ServiceResponse<BotState>> {
-    // CRITICAL: No fallbacks allowed - bot state is critical for trading operations
-    if (process.env.NODE_ENV === 'development' && !process.env.DATABASE_URL && !process.env.DATABASE_HOST) {
-      throw new CriticalDatabaseError('Database unavailable - cannot manage bot state without persistence layer', 'DB_UNAVAILABLE');
-    }
-
-    try {
-      // Try to get existing state
-      const existing = await query<BotState>(`
-        SELECT * FROM bot_states WHERE user_id = $1
-      `, [user_id]);
-
-      if (existing.rows.length > 0) {
-        return {
-          success: true,
-          data: existing.rows[0]
-        };
-      }
-
-      // Create default state
-      const result = await query<BotState>(`
-        INSERT INTO bot_states (user_id, enabled, configuration)
-        VALUES ($1, $2, $3)
-        RETURNING *
-      `, [user_id, true, JSON.stringify({ enabled: true })]);
-
-      return {
-        success: true,
-        data: result.rows[0],
-        message: 'Bot state created with defaults'
-      };
-    } catch {
-      console.error('❌ Error getting or creating bot state:');
+  static async getOrCreate(user_id: string): Promise<ServiceResponse<BotState & { headers: { 'X-Cache-Status': 'HIT' | 'MISS' } }>> {
+    console.log(`🔍 Getting bot state for user: ${user_id}`);
+    
+    // CRITICAL: Validate user_id parameter to prevent NULL constraint violations
+    if (!user_id || user_id === 'null' || user_id === 'undefined') {
+      console.error('❌ CRITICAL: user_id is null/undefined/invalid:', user_id);
       return {
         success: false,
-        error: 'Unknown error'
+        error: 'Invalid user_id parameter - cannot be null or undefined'
+      };
+    }
+    
+    // Import Redis service - user_id parameter is actually wallet address
+    const { redisService, cacheUtils } = await import('./redis');
+    const cacheKey = cacheUtils.userKey(user_id, 'bot_status');
+    
+    try {
+      // Step 1: Attempt to read from Redis cache
+      const cacheResult = await redisService.get<BotState>(cacheKey);
+      
+      if (cacheResult.success && cacheResult.data) {
+        console.log(`🎯 Cache HIT for bot state: ${user_id}`);
+        return { 
+          success: true,
+          data: { ...cacheResult.data, headers: { 'X-Cache-Status': 'HIT' } }
+        };
+      }
+      
+      // Step 2: Cache miss - read from PostgreSQL (source of truth)
+      console.log(`💾 Cache MISS for bot state: ${user_id} - reading from database`);
+      
+      // Try to get existing state - user_id parameter is actually the wallet address
+      const existing = await query<BotState>(`
+        SELECT * FROM bot_states WHERE user_wallet = $1
+      `, [user_id]);
+
+      let botState: BotState;
+      
+      if (existing.rows.length > 0) {
+        botState = existing.rows[0];
+      } else {
+        // Create default state - user_id parameter is actually the wallet address
+        const walletAddress = user_id;
+        
+        // CRITICAL: Final SQL-level NULL check before INSERT
+        if (!walletAddress || walletAddress === 'null' || walletAddress === 'undefined' || walletAddress.trim() === '') {
+          throw new Error(`CRITICAL: Attempted INSERT with invalid wallet address: ${walletAddress}`);
+        }
+        
+        const result = await query<BotState>(`
+          INSERT INTO bot_states (user_wallet, user_id, vault_address, enabled, configuration, current_state)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING *
+        `, [
+          walletAddress, 
+          `user_${walletAddress.slice(0, 8)}`, // Generate user_id from wallet
+          walletAddress, // Use wallet address as vault_address for now
+          false, 
+          JSON.stringify({ enabled: false }),
+          'IDLE'
+        ]);
+        
+        botState = result.rows[0];
+      }
+      
+      // Step 3: Store result in Redis with TTL
+      const setResult = await redisService.set(cacheKey, botState, cacheUtils.TTL.MEDIUM);
+      if (setResult.success) {
+        console.log(`✅ Bot state cached: ${user_id} = ${botState.enabled ? 'ENABLED' : 'DISABLED'}`);
+      } else {
+        console.warn(`⚠️ Failed to cache bot state for ${user_id}:`, setResult.error);
+      }
+      
+      return {
+        success: true,
+        data: { ...botState, headers: { 'X-Cache-Status': 'MISS' } },
+        message: existing.rows.length > 0 ? undefined : 'Bot state created with defaults'
+      };
+    } catch (error) {
+      console.error('❌ Error getting or creating bot state:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   }
 
   /**
-   * Update bot state (enable/disable)
+   * Write-through cache invalidation pattern (PRD Step 2)
+   * 1. Update PostgreSQL (source of truth)
+   * 2. Immediately delete Redis cache key
    */
-  static async update(user_id: string, data: UpdateBotStateData): Promise<ServiceResponse<BotState>> {
-    // CRITICAL: No fallbacks allowed - bot state changes must persist
-    if (process.env.NODE_ENV === 'development' && !process.env.DATABASE_URL && !process.env.DATABASE_HOST) {
-      throw new CriticalDatabaseError('Database unavailable - cannot update bot state without persistence layer', 'DB_UNAVAILABLE');
+  static async update(user_id: string, data: UpdateBotStateData): Promise<ServiceResponse<BotState & { headers: { 'X-Cache-Status': 'MISS' } }>> {
+    console.log(`🔄 Setting bot state: ${user_id} = ${data.enabled ? 'ENABLED' : 'DISABLED'}`);
+    
+    // CRITICAL: Validate user_id parameter to prevent NULL constraint violations
+    if (!user_id || user_id === 'null' || user_id === 'undefined') {
+      console.error('❌ CRITICAL: user_id is null/undefined/invalid in update:', user_id);
+      return {
+        success: false,
+        error: 'Invalid user_id parameter - cannot be null or undefined'
+      };
     }
-
+    
+    // Import Redis service
+    const { redisService, cacheUtils } = await import('./redis');
+    
     try {
+      // Step 1: Update the primary source of truth (PostgreSQL) - user_id parameter is wallet address
       const result = await query<BotState>(`
         UPDATE bot_states 
         SET enabled = COALESCE($2, enabled),
             configuration = COALESCE($3, configuration),
             last_updated = now(),
             updated_at = now()
-        WHERE user_id = $1
+        WHERE user_wallet = $1
         RETURNING *
       `, [user_id, data.enabled, data.configuration ? JSON.stringify(data.configuration) : null]);
 
+      let botState: BotState;
+      
       if (result.rows.length === 0) {
-        // If no existing state, create one
-        return await this.create({ user_id, ...data });
+        // If no existing state, use getOrCreate to create it (wallet address as user_id)
+        const createResult = await this.getOrCreate(user_id);
+        if (!createResult.success || !createResult.data) {
+          throw new Error('Failed to create bot state');
+        }
+        // Now manually update the enabled status since getOrCreate created it as disabled
+        const updateResult = await query<BotState>(`
+          UPDATE bot_states 
+          SET enabled = COALESCE($2, enabled),
+              configuration = COALESCE($3, configuration),
+              last_updated = now(),
+              updated_at = now()
+          WHERE user_wallet = $1
+          RETURNING *
+        `, [user_id, data.enabled, data.configuration ? JSON.stringify(data.configuration) : null]);
+        
+        if (updateResult.rows.length === 0) {
+          throw new Error('Failed to update bot state after creation');
+        }
+        botState = updateResult.rows[0];
+      } else {
+        botState = result.rows[0];
+      }
+      
+      console.log(`✅ Database updated: ${user_id} = ${botState.enabled ? 'ENABLED' : 'DISABLED'}`);
+      
+      // Step 2: Immediately and explicitly delete the cache key from Redis
+      const cacheKey = cacheUtils.userKey(user_id, 'bot_status');
+      const deleteResult = await redisService.delete(cacheKey);
+      
+      if (deleteResult.success) {
+        console.log(`✅ Cache key deleted: ${cacheKey}`);
+      } else {
+        console.warn(`⚠️ Failed to delete cache key ${cacheKey}:`, deleteResult.error);
       }
 
       return {
         success: true,
-        data: result.rows[0],
+        data: { ...botState, headers: { 'X-Cache-Status': 'MISS' } }, // Next read will be MISS
         message: 'Bot state updated successfully'
       };
-    } catch {
-      console.error('❌ Error updating bot state:');
+    } catch (error) {
+      console.error('❌ Error updating bot state:', error);
       return {
         success: false,
-        error: 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   }

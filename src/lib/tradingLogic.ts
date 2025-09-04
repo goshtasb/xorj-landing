@@ -4,9 +4,10 @@
  */
 
 import { Connection, PublicKey } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress, getAccount } from '@solana/spl-token';
+// Use direct program ID and simplified token operations
+const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 import { marketDataService } from './marketData';
-import { priceValidator } from './priceValidation';
+// import { priceValidator } from './priceValidation'; // Unused for now
 
 // Core TradeSignal interface as specified
 export interface TradeSignal {
@@ -108,7 +109,6 @@ export class TradingLogicService {
    */
   async fetchStrategicGuidance(userId: string): Promise<StrategicGuidance | null> {
     try {
-      console.log(`📊 Fetching strategic guidance for user ${userId}`);
 
       const response = await fetch(`${this.QUANTITATIVE_ENGINE_API}/internal/ranked-traders`, {
         method: 'GET',
@@ -134,7 +134,6 @@ export class TradingLogicService {
       };
 
       this.lastStrategicGuidance.set(userId, guidance);
-      console.log(`✅ Strategic guidance obtained: ${JSON.stringify(guidance.allocation)}`);
       
       return guidance;
 
@@ -144,7 +143,6 @@ export class TradingLogicService {
       // Return cached guidance if available and not too stale
       const cached = this.lastStrategicGuidance.get(userId);
       if (cached && (Date.now() - cached.lastUpdated) < this.config.staleDataThreshold) {
-        console.warn(`⚠️ Using cached strategic guidance for ${userId}`);
         return cached;
       }
 
@@ -157,7 +155,6 @@ export class TradingLogicService {
    */
   async fetchVaultHoldings(userId: string, vaultAddress: string): Promise<VaultHoldings | null> {
     try {
-      console.log(`🔍 Fetching vault holdings for ${vaultAddress}`);
 
       const vaultPublicKey = new PublicKey(vaultAddress);
       const holdings: VaultHoldings = {
@@ -172,7 +169,6 @@ export class TradingLogicService {
         programId: TOKEN_PROGRAM_ID
       });
 
-      console.log(`📦 Found ${tokenAccounts.value.length} token accounts`);
 
       for (const tokenAccountInfo of tokenAccounts.value) {
         try {
@@ -199,10 +195,9 @@ export class TradingLogicService {
 
           holdings.totalValue += value;
 
-          console.log(`💰 Asset found: ${symbol} - Balance: ${balance}, Value: $${value.toFixed(2)}`);
 
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         } catch (accountError) {
-          console.warn(`⚠️ Could not process token account:`, accountError);
         }
       }
 
@@ -215,7 +210,6 @@ export class TradingLogicService {
       }
 
       this.lastVaultHoldings.set(vaultAddress, holdings);
-      console.log(`✅ Vault holdings fetched: Total value $${holdings.totalValue.toFixed(2)}`);
       
       return holdings;
 
@@ -225,7 +219,6 @@ export class TradingLogicService {
       // Return cached holdings if available and not too stale
       const cached = this.lastVaultHoldings.get(vaultAddress);
       if (cached && (Date.now() - cached.lastFetched) < this.config.staleDataThreshold) {
-        console.warn(`⚠️ Using cached vault holdings for ${vaultAddress}`);
         return cached;
       }
 
@@ -243,7 +236,6 @@ export class TradingLogicService {
     holdings: VaultHoldings
   ): Promise<TradeSignal | null> {
     try {
-      console.log(`🧠 Analyzing discrepancy for trade signal generation`);
 
       // Find the largest discrepancy
       let maxDiscrepancy = 0;
@@ -254,16 +246,14 @@ export class TradingLogicService {
         const currentPercentage = currentHolding?.percentage || 0;
         const discrepancy = Math.abs(targetAllocation.targetPercentage - currentPercentage);
 
-        console.log(`📊 ${targetAllocation.symbol}: Target ${targetAllocation.targetPercentage}%, Current ${currentPercentage.toFixed(2)}%, Discrepancy ${discrepancy.toFixed(2)}%`);
 
         if (discrepancy > this.config.rebalanceThreshold && discrepancy > maxDiscrepancy) {
           maxDiscrepancy = discrepancy;
 
           // Determine source asset (largest current holding that's not the target)
-          let fromAsset = this.findLargestNonTargetHolding(holdings, targetMint);
+          const fromAsset = this.findLargestNonTargetHolding(holdings, targetMint);
           
           if (!fromAsset) {
-            console.warn(`⚠️ No source asset found for rebalancing to ${targetAllocation.symbol}`);
             continue;
           }
 
@@ -282,7 +272,7 @@ export class TradingLogicService {
               discrepancy,
               confidence: guidance.confidence,
               timestamp: Date.now(),
-              signalId: `signal_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+              signalId: `signal_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`
             }
           };
         }
@@ -290,29 +280,26 @@ export class TradingLogicService {
 
       // Check if we should generate a signal
       if (!signalCandidate || maxDiscrepancy < this.config.rebalanceThreshold) {
-        console.log(`✅ No rebalancing needed - max discrepancy ${maxDiscrepancy.toFixed(2)}% below threshold ${this.config.rebalanceThreshold}%`);
         return null;
       }
 
       if (guidance.confidence < this.config.confidenceThreshold) {
-        console.warn(`⚠️ Strategic guidance confidence ${guidance.confidence} below threshold ${this.config.confidenceThreshold}`);
         return null;
       }
 
       // Check rate limiting
       const existingSignals = this.processedSignals.get(userId) || [];
       if (existingSignals.length >= this.config.maxSignalsPerUser) {
-        console.warn(`⚠️ Rate limit reached for user ${userId} - ${existingSignals.length} pending signals`);
         return null;
       }
 
       const signal = signalCandidate as TradeSignal;
-      
+
       // Store signal for tracking
       existingSignals.push(signal);
       this.processedSignals.set(userId, existingSignals);
 
-      console.log(`🚨 TRADE SIGNAL GENERATED:`, {
+      console.log('✅ Generated trade signal:', {
         action: signal.action,
         from: `${signal.fromAsset.symbol} (${signal.fromAsset.mintAddress.substring(0, 8)}...)`,
         to: `${signal.toAsset.symbol} (${signal.toAsset.mintAddress.substring(0, 8)}...)`,
@@ -333,7 +320,6 @@ export class TradingLogicService {
    * Main processing pipeline - orchestrates all steps
    */
   async processTradeSignals(userId: string, vaultAddress: string): Promise<TradeSignal[]> {
-    console.log(`🏭 Starting trade signal processing pipeline for user ${userId}`);
     
     const signals: TradeSignal[] = [];
 
@@ -358,7 +344,6 @@ export class TradingLogicService {
         signals.push(signal);
       }
 
-      console.log(`🏁 Pipeline complete: Generated ${signals.length} trade signal(s)`);
       return signals;
 
     } catch (error) {
@@ -368,14 +353,14 @@ export class TradingLogicService {
   }
 
   // Utility methods
-  private parseAllocation(allocation: any): { [mintAddress: string]: { symbol: string; targetPercentage: number } } {
+  private parseAllocation(allocation: unknown): { [mintAddress: string]: { symbol: string; targetPercentage: number } } {
     const result: { [mintAddress: string]: { symbol: string; targetPercentage: number } } = {};
     
     // Handle different possible API response formats
     if (typeof allocation === 'object' && allocation !== null) {
       for (const [key, value] of Object.entries(allocation)) {
         if (typeof value === 'object' && value !== null) {
-          const v = value as any;
+          const v = value as { symbol?: string; targetPercentage?: number; percentage?: number };
           const mintAddress = this.getMintAddress(key) || key;
           result[mintAddress] = {
             symbol: key,
@@ -425,7 +410,6 @@ export class TradingLogicService {
   // Signal management
   clearProcessedSignals(userId: string): void {
     this.processedSignals.delete(userId);
-    console.log(`🧹 Cleared processed signals for user ${userId}`);
   }
 
   getProcessedSignals(userId: string): TradeSignal[] {

@@ -68,7 +68,7 @@ class TradeGenerator:
     async def initialize(self):
         """Initialize async components."""
         if self.idempotency_manager is None:
-            self.idempotency_manager = await get_idempotency_manager()
+            self.idempotency_manager = get_idempotency_manager()
             logger.info("Trade Generator idempotency manager initialized")
     
     async def generate_trades(
@@ -101,15 +101,15 @@ class TradeGenerator:
         # Check idempotency for trade generation (NFR-1)
         if self.idempotency_manager:
             strategy_data = {
-                "target_allocations": {k: str(v) for k, v in portfolio_comparison.target_allocations.items()},
+                "target_allocations": [alloc.to_dict() for alloc in portfolio_comparison.target_allocations],
                 "rebalance_required": portfolio_comparison.rebalance_required,
                 "total_rebalance_amount": str(portfolio_comparison.total_rebalance_amount),
-                "discrepancies": [disc.to_dict() for disc in portfolio_comparison.discrepancies]
+                "discrepancies": {k: str(v) for k, v in portfolio_comparison.discrepancies.items()}
             }
             
             portfolio_state = {
-                "current_holdings": {k: str(v) for k, v in portfolio_comparison.current_holdings.items()},
-                "total_value_usd": str(portfolio_comparison.total_value_usd),
+                "current_holdings": [holding.to_dict() for holding in portfolio_comparison.current_portfolio.holdings],
+                "total_value_usd": str(portfolio_comparison.current_portfolio.total_usd_value),
                 "vault_address": portfolio_comparison.vault_address
             }
             

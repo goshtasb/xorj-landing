@@ -11,7 +11,7 @@ import { PublicKey } from '@solana/web3.js';
 import { UserSettingsService } from '@/lib/userSettingsService';
 // import { UserSettingsService } from '@/lib/botStateService'; // Commented out to fix profile page loading
 
-export type RiskProfile = 'Conservative' | 'Balanced' | 'Aggressive';
+export type RiskProfile = 'conservative' | 'moderate' | 'aggressive';
 
 interface UserSettings {
   walletAddress: string;
@@ -70,14 +70,12 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiRespons
   const requestId = `settings_get_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
   try {
-    console.log(`⚙️ Settings GET Request: ${requestId}`);
     
     // Extract wallet address from query parameters
     const { searchParams } = new URL(request.url);
     const walletAddress = searchParams.get('walletAddress');
 
     if (!walletAddress) {
-      console.warn(`⚠️ Missing wallet address: ${requestId}`);
       return NextResponse.json<ApiResponse<null>>({
         success: false,
         error: 'Wallet address is required',
@@ -90,7 +88,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiRespons
     try {
       new PublicKey(walletAddress);
     } catch {
-      console.warn(`⚠️ Invalid wallet address format: ${walletAddress} - ${requestId}`);
       return NextResponse.json<ApiResponse<null>>({
         success: false,
         error: 'Invalid wallet address format',
@@ -105,7 +102,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiRespons
     const cachedResult = await cacheLayer.getUserSettings(walletAddress);
     
     if (cachedResult.success && cachedResult.data) {
-      console.log(`🎯 Cache returned settings for ${walletAddress} (fromCache: ${cachedResult.fromCache})`);
       
       // Transform cached data to API format
       const cachedSettings = cachedResult.data as Record<string, unknown>;
@@ -116,7 +112,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiRespons
         
         if (dbSettings) {
           // User has saved settings in database
-          console.log(`📦 Using database settings for ${walletAddress}: riskProfile = ${dbSettings.riskProfile}`);
           
           const apiUserSettings: UserSettings = {
             walletAddress: walletAddress,
@@ -125,7 +120,8 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiRespons
             positionSizePercent: 5,
             stopLossEnabled: true,
             takeProfitEnabled: true,
-            investmentAmount: dbSettings.investmentAmount || 1000,
+            // Include investmentAmount - default to 0 for first-time users
+            investmentAmount: dbSettings.investmentAmount ?? 0,
             lastUpdated: dbSettings.lastUpdated.getTime(),
             createdAt: Date.now()
           };
@@ -146,7 +142,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiRespons
           });
         } else {
           // No saved settings in database - return null to indicate no saved settings
-          console.log(`🆕 No saved settings found in database for ${walletAddress} - returning null`);
           
           const processingTime = Date.now() - startTime;
           
@@ -164,21 +159,27 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiRespons
           });
         }
       } catch (dbError) {
-        console.error(`❌ Database error fetching settings for ${walletAddress}:`, dbError);
+        // In development mode, suppress connection pool errors to reduce noise
+        if (process.env.NODE_ENV === 'development' && (dbError as Error)?.message?.includes('too many clients')) {
+          console.warn(`⚠️ Database connection pool exhausted for ${walletAddress} (API route)`);
+        } else {
+          console.error(`❌ Database error fetching settings for ${walletAddress}:`, dbError);
+        }
         // Fall back to cache/default behavior
       }
       
       // This code should never be reached since we handle persistent storage above
       console.error(`🚨 Unexpected code path reached in settings GET API for ${walletAddress}`);
       
-      // Transform risk profile from lowercase (cache/database) to title case (frontend)
+      // Transform risk profile - normalize to lowercase
       const transformRiskProfile = (profile?: string): RiskProfile => {
-        if (!profile) return 'Balanced';
+        if (!profile) return 'moderate';
         switch (profile.toLowerCase()) {
-          case 'conservative': return 'Conservative';
-          case 'balanced': return 'Balanced';
-          case 'aggressive': return 'Aggressive';
-          default: return 'Balanced';
+          case 'conservative': return 'conservative';
+          case 'moderate':
+          case 'balanced': return 'moderate';
+          case 'aggressive': return 'aggressive';
+          default: return 'moderate';
         }
       };
 
@@ -189,7 +190,7 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiRespons
         positionSizePercent: cachedSettings.position_size_percent || 5,
         stopLossEnabled: cachedSettings.stop_loss_enabled ?? true,
         takeProfitEnabled: cachedSettings.take_profit_enabled ?? true,
-        investmentAmount: cachedSettings.investment_amount || 1000,
+        investmentAmount: cachedSettings.investment_amount || 0,
         lastUpdated: cachedSettings.updated_at ? new Date(cachedSettings.updated_at).getTime() : Date.now(),
         createdAt: Date.now()
       };
@@ -212,7 +213,6 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiRespons
       // Cache failed - use persistent storage fallback
       console.error(`❌ Cache layer failed for ${walletAddress} settings:`, cachedResult.error);
       
-      console.log(`🔄 Using database fallback: ${walletAddress}`);
       
       try {
         // Try database as final fallback
@@ -228,12 +228,12 @@ export async function GET(request: NextRequest): Promise<NextResponse<ApiRespons
             positionSizePercent: 5,
             stopLossEnabled: true,
             takeProfitEnabled: true,
-            investmentAmount: dbSettings.investmentAmount || 1000,
+            // Include investmentAmount - default to 0 for first-time users
+            investmentAmount: dbSettings.investmentAmount ?? 0,
             lastUpdated: dbSettings.lastUpdated.getTime(),
             createdAt: Date.now()
           };
           
-          console.log(`📦 Using database fallback settings: riskProfile = ${dbSettings.riskProfile}`);
 
           return NextResponse.json<ApiResponse<UserSettings>>({
             success: true,
@@ -306,13 +306,11 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
   const requestId = `settings_post_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
   try {
-    console.log(`⚙️ Settings POST Request: ${requestId}`);
     
     const body = await request.json() as RequestBody;
     const { walletAddress, settings, investmentAmount, riskProfile } = body;
 
     if (!walletAddress) {
-      console.warn(`⚠️ Missing wallet address: ${requestId}`);
       return NextResponse.json<ApiResponse<null>>({
         success: false,
         error: 'Wallet address is required',
@@ -328,7 +326,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
     };
 
     if (!settingsData && !investmentAmount && !riskProfile) {
-      console.warn(`⚠️ Missing settings data: ${requestId}`);
       return NextResponse.json<ApiResponse<null>>({
         success: false,
         error: 'Settings data is required',
@@ -341,7 +338,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
     try {
       new PublicKey(walletAddress);
     } catch {
-      console.warn(`⚠️ Invalid wallet address format: ${walletAddress} - ${requestId}`);
       return NextResponse.json<ApiResponse<null>>({
         success: false,
         error: 'Invalid wallet address format',
@@ -353,7 +349,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
     // Validate settings
     const validationError = validateSettings(settingsData);
     if (validationError) {
-      console.warn(`⚠️ Invalid settings: ${validationError} - ${requestId}`);
       return NextResponse.json<ApiResponse<null>>({
         success: false,
         error: validationError,
@@ -362,64 +357,56 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
       }, { status: 400 });
     }
 
-    console.log(`💾 Updating settings for wallet: ${walletAddress} (persistent storage)`);
-    console.log(`🎯 New settings:`, settingsData);
 
-    // PRODUCTION: Persist settings to database using UserSettingsService
-    if (settingsData.riskProfile || settingsData.investmentAmount) {
+    // PERMANENT SOLUTION: Use unified risk profile synchronization service
+    if (settingsData.riskProfile || settingsData.investmentAmount !== undefined) {
       try {
-        const savedSettings = await UserSettingsService.saveUserSettings(
-          walletAddress, 
-          settingsData.riskProfile || 'Balanced',
+        console.log(`🔄 Starting unified risk profile sync for ${walletAddress}`);
+        
+        // Import the permanent synchronization service
+        const { riskProfileSyncService } = await import('@/lib/riskProfileSyncService');
+        
+        // Perform guaranteed synchronization across all systems
+        const syncResult = await riskProfileSyncService.updateRiskProfile(
+          walletAddress,
+          settingsData.riskProfile || 'moderate',
           settingsData.investmentAmount
         );
-        console.log(`✅ Settings persisted to database: ${walletAddress} - riskProfile: ${savedSettings.riskProfile}, investmentAmount: ${savedSettings.investmentAmount}`);
-      } catch (dbError) {
-        console.error(`❌ Failed to persist settings to database for ${walletAddress}:`, dbError);
-        // For production readiness, we should fail the request if database persistence fails
-        return NextResponse.json<ApiResponse<null>>({
-          success: false,
-          error: 'Failed to save settings to database',
-          timestamp: Date.now(),
-          requestId
-        }, { status: 500 });
-      }
-    } else {
-      console.log(`⚠️ No settings to persist for ${walletAddress}`);
-    }
-
-    // Sync settings changes to bot service
-    if (settingsData.riskProfile || settingsData.investmentAmount) {
-      try {
-        const botConfigUpdate: BotConfigUpdate = {};
         
-        if (settingsData.riskProfile) {
-          console.log(`🤖 Syncing risk profile to bot service: ${settingsData.riskProfile.toLowerCase()}`);
-          botConfigUpdate.risk_profile = settingsData.riskProfile.toLowerCase();
-        }
-        
-        if (settingsData.investmentAmount) {
-          console.log(`💰 Syncing investment amount to bot service: $${settingsData.investmentAmount}`);
-          botConfigUpdate.max_trade_amount = settingsData.investmentAmount;
-        }
-        
-        const botResponse = await fetch(`${process.env.NEXT_PUBLIC_FASTAPI_GATEWAY_URL || 'http://localhost:8000'}/api/v1/bot/configuration/${walletAddress}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(botConfigUpdate)
-        });
-
-        if (botResponse.ok) {
-          const botResult = await botResponse.json() as BotResponseResult;
-          console.log(`✅ Bot configuration updated successfully: ${botResult.message}`);
+        if (syncResult.success) {
+          console.log(`✅ PERMANENT SOLUTION: Risk profile synchronized successfully across all systems for ${walletAddress}`);
         } else {
-          console.warn(`⚠️ Failed to update bot configuration: ${botResponse.status} ${botResponse.statusText}`);
+          console.warn(`⚠️ PERMANENT SOLUTION: Sync completed with issues for ${walletAddress}:`, {
+            errors: syncResult.errors,
+            conflicts: syncResult.conflicts
+          });
+          
+          // Still proceed - the service handles fallbacks and auto-reconciliation
+          // This prevents user-facing failures while ensuring eventual consistency
         }
-      } catch (error) {
-        console.error(`❌ Error syncing to bot service:`, error);
-        // Don't fail the entire operation if bot sync fails
+      } catch (syncError) {
+        console.error(`❌ PERMANENT SOLUTION: Risk profile sync service failed for ${walletAddress}:`, syncError);
+        
+        // Fallback to legacy UserSettingsService for critical failure scenarios
+        try {
+          console.log(`🔄 Falling back to legacy UserSettingsService for ${walletAddress}`);
+          await UserSettingsService.saveUserSettings(
+            walletAddress, 
+            settingsData.riskProfile || 'moderate',
+            settingsData.investmentAmount
+          );
+          console.log(`✅ Legacy fallback completed for ${walletAddress}`);
+        } catch (fallbackError) {
+          console.error(`❌ Even legacy fallback failed for ${walletAddress}:`, fallbackError);
+          
+          // Only fail the request if both the permanent solution AND legacy fallback fail
+          return NextResponse.json<ApiResponse<null>>({
+            success: false,
+            error: 'Critical failure: Unable to save settings using any available method',
+            timestamp: Date.now(),
+            requestId
+          }, { status: 500 });
+        }
       }
     }
 
@@ -428,7 +415,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
     // PHASE 1: Invalidate cache after settings update
     const { cacheLayer } = await import('@/lib/cacheLayer');
     await cacheLayer.invalidateUserCache(walletAddress, 'settings');
-    console.log(`🗑️ Invalidated settings cache for ${walletAddress}`);
 
     // Get the actual saved settings from database to return accurate data
     let apiUpdatedSettings: UserSettings;
@@ -450,7 +436,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
         // Fallback if database read fails after save
         apiUpdatedSettings = {
           walletAddress: walletAddress,
-          riskProfile: settingsData.riskProfile || 'Balanced',
+          riskProfile: settingsData.riskProfile || 'moderate',
           maxDrawdownLimit: settingsData.maxDrawdownLimit || 15,
           positionSizePercent: settingsData.positionSizePercent || 5,
           stopLossEnabled: settingsData.stopLossEnabled ?? true,
@@ -465,7 +451,7 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
       // Use the submitted data as fallback
       apiUpdatedSettings = {
         walletAddress: walletAddress,
-        riskProfile: settingsData.riskProfile || 'Balanced',
+        riskProfile: settingsData.riskProfile || 'moderate',
         maxDrawdownLimit: settingsData.maxDrawdownLimit || 15,
         positionSizePercent: settingsData.positionSizePercent || 5,
         stopLossEnabled: settingsData.stopLossEnabled ?? true,
@@ -476,8 +462,6 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
       };
     }
     
-    console.log(`✅ Settings updated: ${requestId} - ${processingTime}ms`);
-    console.log(`🎯 Risk Profile: ${apiUpdatedSettings.riskProfile}`);
 
     return NextResponse.json<ApiResponse<UserSettings>>({
       success: true,
@@ -509,8 +493,8 @@ export async function POST(request: NextRequest): Promise<NextResponse<ApiRespon
  * Validate settings update data
  */
 function validateSettings(settings: UserSettingsUpdate): string | null {
-  if (settings.riskProfile && !['Conservative', 'Balanced', 'Aggressive'].includes(settings.riskProfile)) {
-    return 'Invalid risk profile. Must be Conservative, Balanced, or Aggressive';
+  if (settings.riskProfile && !['conservative', 'moderate', 'aggressive'].includes(settings.riskProfile)) {
+    return 'Invalid risk profile. Must be conservative, moderate, or aggressive';
   }
 
   if (settings.maxDrawdownLimit !== undefined) {
@@ -534,8 +518,8 @@ function validateSettings(settings: UserSettingsUpdate): string | null {
   }
 
   if (settings.investmentAmount !== undefined) {
-    if (typeof settings.investmentAmount !== 'number' || settings.investmentAmount <= 0 || settings.investmentAmount > 1000000) {
-      return 'Invalid investment amount. Must be between $1 and $1,000,000';
+    if (typeof settings.investmentAmount !== 'number' || settings.investmentAmount < 0 || settings.investmentAmount > 1000000) {
+      return 'Invalid investment amount. Must be between $0 and $1,000,000';
     }
     // Note: Wallet balance validation is handled client-side for real-time feedback
     // Server-side validation could be added here with wallet balance service integration

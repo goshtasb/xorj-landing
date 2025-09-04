@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { useRouter } from 'next/navigation';
-import { Wallet, LogOut, Loader2, User, AlertCircle, Shield } from 'lucide-react';
+import { Wallet, LogOut, Loader2, User, Shield } from 'lucide-react';
 import { detectWallets } from '@/utils/walletDetection';
 import WalletConflictModal from './WalletConflictModal';
 import { useSimpleWallet } from '@/contexts/SimpleWalletContext';

@@ -7,8 +7,8 @@ import { TradeService } from '../src/lib/botStateService';
 import { CreateTradeData, TradeStatus } from '../src/types/database';
 
 describe('Critical Flaw #1: Database-Level Duplicate Trade Prevention', () => {
-  const mockTradeData: Omit<CreateTradeData, 'client_order_id'> = {
-    job_id: 'test_job_123',
+  const mockTradeData = {
+    job_id: null,
     user_vault_address: '5QfzCCipXjebAfHpMhCJAoxUJL2TyqM5p8tCFLjsPbmh',
     status: 'PENDING' as TradeStatus,
     from_token_address: 'So11111111111111111111111111111111111111112',
@@ -41,7 +41,7 @@ describe('Critical Flaw #1: Database-Level Duplicate Trade Prevention', () => {
       );
       
       expect(id1).toBe(id2);
-      expect(id1).toMatch(/^trade_[a-f0-9]{32}$/);
+      expect(id1).toMatch(/^[A-F0-9]{8}_\d+_[A-F0-9]{6}$/);
     });
 
     it('should generate different keys for different trade parameters', () => {

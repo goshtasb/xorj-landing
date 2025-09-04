@@ -36,7 +36,7 @@ interface ModalProps {
 
 // Enhanced Deposit Modal
 export function DepositModal({ onClose }: ModalProps) {
-  const connection = useMemo(() => new Connection(clusterApiUrl('devnet')), [])
+  const connection = useMemo(() => new Connection(process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'), [])
   const { publicKey } = useSimpleWallet()
   const {
     vaultAddress,
@@ -282,7 +282,7 @@ export function DepositModal({ onClose }: ModalProps) {
 
 // Enhanced Withdrawal Modal
 export function WithdrawModal({ onClose }: ModalProps) {
-  const connection = useMemo(() => new Connection(clusterApiUrl('devnet')), [])
+  const connection = useMemo(() => new Connection(process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'), [])
   const { publicKey } = useSimpleWallet()
   const {
     vaultAddress,
@@ -538,7 +538,7 @@ export function WithdrawModal({ onClose }: ModalProps) {
 
 // Bot Authorization Modal
 export function BotAuthorizationModal({ onClose }: ModalProps) {
-  const connection = useMemo(() => new Connection(clusterApiUrl('devnet')), [])
+  const connection = useMemo(() => new Connection(process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'), [])
   const { publicKey } = useSimpleWallet()
   const {
     vaultAddress,

@@ -14,6 +14,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createRateLimitMiddleware, RATE_LIMIT_TIERS } from './rateLimiter';
+import { CSRFProtection } from './csrfProtection';
+import { SecurityAuditLogger } from './auditLogger';
 
 /**
  * Security Configuration per Route
@@ -168,7 +170,7 @@ const SECURITY_HEADERS = {
  * Security Middleware Class
  */
 export class SecurityMiddleware {
-  private rateLimitMiddlewares: Map<string, any> = new Map();
+  private rateLimitMiddlewares: Map<string, (req: Request, res: Response, next: () => void) => void> = new Map();
 
   constructor() {
     // Pre-create rate limit middlewares for better performance
@@ -191,9 +193,14 @@ export class SecurityMiddleware {
       // Find matching security configuration
       const config = this.getSecurityConfig(pathname);
       
-      // Apply security headers to response
+      // Apply security headers to response  
       const response = NextResponse.next();
-      this.applySecurityHeaders(response, config);
+      const securityResponse = this.applySecurityHeaders(request, response, config);
+      
+      // If HTTPS enforcement returned a redirect, return it immediately
+      if (securityResponse instanceof NextResponse) {
+        return securityResponse;
+      }
 
       // 1. Rate Limiting Check
       const rateLimitResult = await this.checkRateLimit(request, config);
@@ -205,7 +212,25 @@ export class SecurityMiddleware {
         return rateLimitResult;
       }
 
-      // 2. Authentication Check
+      // 2. CSRF Protection Check (before authentication)
+      if (config.validateCSRF) {
+        const csrfResult = CSRFProtection.middleware(request);
+        if (csrfResult) {
+          // SECURITY FIX: Phase 2 - Enhanced audit logging
+          SecurityAuditLogger.logSecurity('csrf_violation', {
+            ip_address: this.getClientIP(request),
+            user_agent: request.headers.get('user-agent') || undefined,
+            endpoint: pathname,
+            method: request.method,
+            request_id: request.headers.get('x-request-id') || undefined
+          }, { reason: 'CSRF token validation failed' });
+          
+          this.logSecurityEvent('CSRF_FAILED', request, { pathname });
+          return csrfResult;
+        }
+      }
+
+      // 3. Authentication Check
       if (config.requireAuth) {
         const authResult = await this.checkAuthentication(request);
         if (authResult) {
@@ -214,8 +239,8 @@ export class SecurityMiddleware {
         }
       }
 
-      // 3. CSRF Protection
-      if (config.validateCSRF && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(request.method)) {
+      // 4. Legacy CSRF Protection (replaced by above)
+      if (false && config.validateCSRF && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(request.method)) {
         const csrfResult = await this.validateCSRF(request);
         if (csrfResult) {
           this.logSecurityEvent('CSRF_VALIDATION_FAILED', request, { pathname });
@@ -300,20 +325,106 @@ export class SecurityMiddleware {
   }
 
   /**
+   * Get allowed origins for CORS
+   */
+  private getAllowedOrigins(): string[] {
+    const allowedOrigins = process.env.ALLOWED_ORIGINS;
+    
+    if (!allowedOrigins) {
+      // Secure defaults based on environment
+      if (process.env.NODE_ENV === 'development') {
+        return ['http://localhost:3000', 'http://localhost:3003', 'https://localhost:3000', 'https://localhost:3003'];
+      } else {
+        // Production should have explicit origins configured
+        return [];
+      }
+    }
+    
+    return allowedOrigins.split(',').map(origin => origin.trim());
+  }
+
+  /**
+   * Enforce HTTPS in production
+   */
+  private enforceHTTPS(request: NextRequest): NextResponse | null {
+    // Only enforce in production
+    if (process.env.NODE_ENV !== 'production') {
+      return null;
+    }
+
+    // Check if the request is already HTTPS
+    const url = new URL(request.url);
+    const forwardedProto = request.headers.get('x-forwarded-proto');
+    const isHTTPS = url.protocol === 'https:' || forwardedProto === 'https';
+
+    if (!isHTTPS) {
+      // Redirect to HTTPS
+      const httpsUrl = new URL(request.url);
+      httpsUrl.protocol = 'https:';
+      
+      console.log(`🔒 Redirecting to HTTPS: ${request.url} → ${httpsUrl.toString()}`);
+      
+      return NextResponse.redirect(httpsUrl.toString(), {
+        status: 301, // Permanent redirect
+        headers: {
+          'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload'
+        }
+      });
+    }
+
+    return null;
+  }
+
+  /**
+   * Get client IP address securely
+   */
+  private getClientIP(request: NextRequest): string {
+    const xForwardedFor = request.headers.get('x-forwarded-for');
+    const xRealIp = request.headers.get('x-real-ip');
+    const cfConnectingIp = request.headers.get('cf-connecting-ip');
+    
+    // Prefer Cloudflare header if available
+    if (cfConnectingIp) return cfConnectingIp;
+    if (xRealIp) return xRealIp;
+    if (xForwardedFor) return xForwardedFor.split(',')[0].trim();
+    
+    return 'unknown';
+  }
+
+  /**
    * Apply security headers to response
    */
-  private applySecurityHeaders(response: NextResponse, config: RouteSecurityConfig): void {
+  private applySecurityHeaders(request: NextRequest, response: NextResponse, config: RouteSecurityConfig): NextResponse | void {
+    // SECURITY FIX: Phase 2 - HTTPS enforcement
+    const httpsEnforced = this.enforceHTTPS(request);
+    if (httpsEnforced) {
+      return httpsEnforced; // Return redirect response
+    }
+    
     // Apply standard security headers
     Object.entries(SECURITY_HEADERS).forEach(([key, value]) => {
       response.headers.set(key, value);
     });
 
-    // Apply CORS headers if allowed
+    // SECURITY FIX: Phase 2 - Implement proper CORS policies
     if (config.allowCORS) {
-      response.headers.set('Access-Control-Allow-Origin', process.env.ALLOWED_ORIGINS || '*');
+      const allowedOrigins = this.getAllowedOrigins();
+      const requestOrigin = request.headers.get('origin');
+      
+      // Only allow requests from approved origins
+      if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+        response.headers.set('Access-Control-Allow-Origin', requestOrigin);
+        response.headers.set('Access-Control-Allow-Credentials', 'true'); // For httpOnly cookies
+      } else if (process.env.NODE_ENV === 'development' && !requestOrigin) {
+        // Allow requests without origin in development (e.g., Postman, curl)
+        response.headers.set('Access-Control-Allow-Origin', 'http://localhost:3000');
+        response.headers.set('Access-Control-Allow-Credentials', 'true');
+      }
+      
       response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token');
+      response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token, X-Requested-With');
       response.headers.set('Access-Control-Max-Age', '86400');
+      response.headers.set('Vary', 'Origin'); // Important for caching
     }
 
     // Apply custom headers
@@ -380,6 +491,7 @@ export class SecurityMiddleware {
 
       return null; // Authentication successful
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (error) {
       return new NextResponse(
         JSON.stringify({
@@ -401,6 +513,7 @@ export class SecurityMiddleware {
    */
   private async validateCSRF(request: NextRequest): Promise<NextResponse | null> {
     const csrfToken = request.headers.get('x-csrf-token');
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const cookies = request.headers.get('cookie');
     
     if (!csrfToken) {
@@ -507,7 +620,7 @@ export class SecurityMiddleware {
   private logSecurityEvent(
     event: string,
     request: NextRequest,
-    metadata: Record<string, any> = {}
+    metadata: Record<string, unknown> = {}
   ): void {
     const logEntry = {
       timestamp: new Date().toISOString(),

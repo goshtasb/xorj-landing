@@ -70,6 +70,21 @@ class BotServiceClient {
     }
   }
 
+  private extractUserIdFromToken(): string | null {
+    if (!this.sessionToken) {
+      return null;
+    }
+    
+    try {
+      // Simple JWT payload extraction (not for verification, just extracting data)
+      const payload = JSON.parse(atob(this.sessionToken.split('.')[1]));
+      return payload.wallet_address || payload.sub || null;
+    } catch (error) {
+      console.warn('Failed to extract user ID from token:', error);
+      return null;
+    }
+  }
+
   /**
    * Clear session token from localStorage
    */
@@ -94,7 +109,7 @@ class BotServiceClient {
     const url = `${this.gatewayUrl}${endpoint}`;
     
     // Check if session token is available
-    if (!this.sessionToken && !endpoint.includes('/auth/')) {
+    if (!this.sessionToken && endpoint && !endpoint.includes('/auth/')) {
       throw new Error('No session token available. Please authenticate first.');
     }
     
@@ -105,7 +120,7 @@ class BotServiceClient {
     };
     
     // Add session token for authenticated endpoints
-    if (this.sessionToken && !endpoint.includes('/auth/')) {
+    if (this.sessionToken && endpoint && !endpoint.includes('/auth/')) {
       headers['Authorization'] = `Bearer ${this.sessionToken}`;
     }
 
@@ -144,7 +159,7 @@ class BotServiceClient {
         throw new Error('Secure gateway request timed out');
       }
       
-      if (error instanceof Error && error.message.includes('fetch')) {
+      if (error instanceof Error && error.message && error.message.includes('fetch')) {
         console.error(`🚫 Secure Gateway Connection Error: ${endpoint}`, error.message);
         throw new Error('Unable to connect to secure gateway. Please ensure the FastAPI service is running.');
       }
@@ -215,7 +230,7 @@ class BotServiceClient {
     if (!this.validateInvestmentAmount(amount)) {
       return {
         success: false,
-        message: 'Invalid investment amount. Must be between $1 and $1,000,000'
+        message: 'Invalid investment amount. Must be between $0 and $1,000,000'
       };
     }
 
@@ -231,7 +246,7 @@ class BotServiceClient {
    */
   private validateInvestmentAmount(amount: number): boolean {
     return typeof amount === 'number' && 
-           amount >= 1 && 
+           amount >= 0 && 
            amount <= 1000000 && 
            Number.isFinite(amount);
   }
@@ -241,9 +256,38 @@ class BotServiceClient {
    * NO manual user_id parameter - extracted from session token
    * Use this for quick bot activation without changing other settings
    */
-  async enableBot(): Promise<{ success: boolean; message: string; enabled: boolean }> {
+  async enableBot(walletAddress?: string): Promise<{ success: boolean; message: string; enabled: boolean }> {
+    // For direct bot service integration, use the actual FastAPI endpoints
+    if (this.baseUrl && this.baseUrl.includes('8001')) {
+      const userIdToUse = walletAddress || this.extractUserIdFromToken();
+      if (!userIdToUse) {
+        throw new Error('User ID required for bot service integration');
+      }
+      
+      // Default bot configuration for starting the bot
+      const botConfiguration = {
+        user_id: userIdToUse,
+        risk_profile: "moderate",
+        slippage_tolerance: 1.0,
+        enabled: true,
+        max_trade_amount: 10000,
+        trading_pairs: []
+      };
+      
+      return this.makeRequest(`/api/v1/bot/start/${userIdToUse}`, {
+        method: 'POST',
+        body: JSON.stringify(botConfiguration),
+      });
+    }
+    
+    // Fallback for secure gateway mode
+    const body = process.env.NODE_ENV === 'development' && !this.sessionToken && walletAddress 
+      ? { walletAddress } 
+      : {};
+      
     return this.makeRequest('/bot/enable', {
       method: 'POST',
+      body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
     });
   }
 
@@ -252,9 +296,28 @@ class BotServiceClient {
    * NO manual user_id parameter - extracted from session token
    * Use this for quick bot deactivation without changing other settings
    */
-  async disableBot(): Promise<{ success: boolean; message: string; enabled: boolean }> {
+  async disableBot(walletAddress?: string): Promise<{ success: boolean; message: string; enabled: boolean }> {
+    // For direct bot service integration, use the actual FastAPI endpoints
+    if (this.baseUrl && this.baseUrl.includes('8001')) {
+      const userIdToUse = walletAddress || this.extractUserIdFromToken();
+      if (!userIdToUse) {
+        throw new Error('User ID required for bot service integration');
+      }
+      
+      return this.makeRequest(`/api/v1/bot/stop/${userIdToUse}`, {
+        method: 'POST',
+        body: JSON.stringify({}), // Empty body for stop endpoint
+      });
+    }
+    
+    // Fallback for secure gateway mode  
+    const body = process.env.NODE_ENV === 'development' && !this.sessionToken && walletAddress 
+      ? { walletAddress } 
+      : {};
+      
     return this.makeRequest('/bot/disable', {
       method: 'POST',
+      body: Object.keys(body).length > 0 ? JSON.stringify(body) : undefined,
     });
   }
 
@@ -394,15 +457,15 @@ export async function updateBotConfiguration(configuration: Partial<BotConfigura
 /**
  * Enable bot - simple activation without changing other settings
  */
-export async function enableBot() {
-  return botService.enableBot();
+export async function enableBot(walletAddress?: string) {
+  return botService.enableBot(walletAddress);
 }
 
 /**
  * Disable bot - simple deactivation without changing other settings
  */
-export async function disableBot() {
-  return botService.disableBot();
+export async function disableBot(walletAddress?: string) {
+  return botService.disableBot(walletAddress);
 }
 
 /**

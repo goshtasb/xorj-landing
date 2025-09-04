@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,20 +20,120 @@ from pydantic import BaseModel
 # Add the app directory to Python path
 sys.path.append(str(Path(__file__).parent / "app"))
 
-from core.trade_execution_engine import TradeExecutionEngine
-from core.audit_logger import AuditLogger
-from core.circuit_breakers import CircuitBreakerManager
-from core.idempotency import IdempotencyManager
-from security.hsm_manager import HSMManager
-from schemas.trade_schemas import GeneratedTrade, TradeExecutionRequest
-from schemas.config_schemas import SystemConfiguration, BotConfiguration
-from utils.health_monitor import HealthMonitor
+from app.core.trade_execution_engine import TradeExecutionEngine
+from app.core.scheduler import get_scheduler
+from app.logging.audit_logger import ImmutableAuditLogger
+from app.security.circuit_breakers import CircuitBreakerManager
+from app.core.idempotency import IdempotencyManager
+from app.security.hsm_manager import HSMManager
+from app.schemas.trade_schemas import GeneratedTrade, TradeExecutionRequest
+from app.schemas.config_schemas import SystemConfiguration, BotConfiguration
+from app.utils.health_monitor import HealthMonitor
+from app.services.background_bot_service import background_bot_service
 
-# Initialize FastAPI app
+# Global service variables
+trade_engine = None
+circuit_breaker_manager = None
+audit_logger = None
+health_monitor = None
+scheduler_instance = None
+scheduler_task = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage service startup and shutdown"""
+    global trade_engine, circuit_breaker_manager, audit_logger, health_monitor, scheduler_instance, scheduler_task, background_service_initialized
+    
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Startup logic
+        logger.info("Trade Execution Bot: Service process starting...")
+        
+        logger.info("Trade Execution Bot: Loading configuration from environment...")
+        api_key = os.getenv("BOT_SERVICE_API_KEY")
+        if not api_key:
+            raise Exception("BOT_SERVICE_API_KEY environment variable not configured")
+        logger.info("Trade Execution Bot: Configuration loaded successfully.")
+        
+        logger.info("Trade Execution Bot: Initializing database connection pool...")
+        try:
+            audit_logger = ImmutableAuditLogger()
+            await audit_logger.initialize()
+            logger.info("Trade Execution Bot: Database connection successful.")
+        except Exception as e:
+            logger.error(f"Database connection failed: {e}")
+            raise
+        
+        logger.info("Trade Execution Bot: Initializing Solana RPC client...")
+        try:
+            circuit_breaker_manager = CircuitBreakerManager()
+            
+            health_monitor = HealthMonitor()
+            await health_monitor.initialize()
+            
+            trade_engine = TradeExecutionEngine(
+                audit_logger=audit_logger,
+                circuit_breaker_manager=circuit_breaker_manager
+            )
+            await trade_engine.initialize()
+            logger.info("Trade Execution Bot: RPC client initialized successfully.")
+        except Exception as e:
+            logger.error(f"RPC client initialization failed: {e}")
+            raise
+        
+        scheduler_instance = get_scheduler()
+        await scheduler_instance.initialize()
+        
+        if await background_bot_service.initialize():
+            await background_bot_service.start()
+            background_service_initialized = True
+            logger.info("🤖 Background Bot Service started - bots will persist across sessions")
+        else:
+            logger.error("Failed to initialize Background Bot Service")
+            background_service_initialized = False
+        
+        logger.info("Trade Execution Bot: Startup complete. Awaiting requests...")
+        logger.info("✅ XORJ Trade Execution Bot Service started successfully with persistent bot management")
+        
+        yield
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to start bot service: {e}")
+        raise
+    finally:
+        # Shutdown logic
+        logger.info("🛑 Shutting down XORJ Trade Execution Bot Service...")
+        
+        if background_service_initialized:
+            await background_bot_service.stop()
+            logger.info("🤖 Background Bot Service stopped")
+        
+        if scheduler_task and not scheduler_task.done():
+            scheduler_task.cancel()
+            try:
+                await scheduler_task
+            except asyncio.CancelledError:
+                pass
+        
+        if scheduler_instance:
+            await scheduler_instance.shutdown()
+        
+        if trade_engine:
+            await trade_engine.shutdown()
+        
+        if health_monitor:
+            await health_monitor.shutdown()
+        
+        logger.info("✅ XORJ Trade Execution Bot Service: Graceful shutdown completed")
+
+# Initialize FastAPI app with lifespan
 app = FastAPI(
     title="XORJ Trade Execution Bot Service",
     description="Enterprise-grade Solana trading bot with AI-driven execution",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Configure CORS for frontend integration
@@ -50,8 +151,11 @@ security = HTTPBearer()
 # Global components
 trade_engine: Optional[TradeExecutionEngine] = None
 circuit_breaker_manager: Optional[CircuitBreakerManager] = None
-audit_logger: Optional[AuditLogger] = None
+audit_logger: Optional[ImmutableAuditLogger] = None
 health_monitor: Optional[HealthMonitor] = None
+scheduler_instance = None
+scheduler_task: Optional[asyncio.Task] = None
+background_service_initialized = False
 
 # Request/Response Models
 class BotStatusResponse(BaseModel):
@@ -103,63 +207,150 @@ async def validate_api_key(credentials: HTTPAuthorizationCredentials = Depends(s
     
     return credentials.credentials
 
-# Initialize service components
-@app.on_event("startup")
-async def startup_event():
-    """Initialize bot service components"""
-    global trade_engine, circuit_breaker_manager, audit_logger, health_monitor
-    
-    logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
-    
-    try:
-        logger.info("🚀 Starting XORJ Trade Execution Bot Service...")
-        
-        # Initialize core components
-        audit_logger = AuditLogger()
-        await audit_logger.initialize()
-        
-        circuit_breaker_manager = CircuitBreakerManager()
-        
-        health_monitor = HealthMonitor()
-        await health_monitor.initialize()
-        
-        # Initialize trade engine with dependencies
-        trade_engine = TradeExecutionEngine(
-            audit_logger=audit_logger,
-            circuit_breaker_manager=circuit_breaker_manager
-        )
-        await trade_engine.initialize()
-        
-        logger.info("✅ XORJ Trade Execution Bot Service started successfully")
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to start bot service: {e}")
-        raise
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup service components"""
-    global trade_engine, circuit_breaker_manager, audit_logger, health_monitor
-    
-    logging.getLogger(__name__).info("🛑 Shutting down XORJ Trade Execution Bot Service...")
-    
-    if trade_engine:
-        await trade_engine.shutdown()
-    
-    if health_monitor:
-        await health_monitor.shutdown()
+# Deprecated event handlers removed - using lifespan context manager instead
 
 # Health Check Endpoint
 @app.get("/health")
 async def health_check():
-    """Service health check"""
-    return {
-        "status": "healthy",
+    """
+    Robust health check endpoint for Trade Execution Bot
+    
+    Performs shallow checks of critical dependencies:
+    - Database connection pool status
+    - RPC client connectivity
+    - Core service components initialization
+    
+    Returns:
+    - 200 OK: All critical dependencies are healthy
+    - 503 Service Unavailable: One or more dependencies are unhealthy
+    """
+    health_status = {
+        "service": "XORJ Trade Execution Bot",
         "version": "1.0.0",
         "timestamp": datetime.now().isoformat(),
-        "service": "XORJ Trade Execution Bot"
+        "status": "healthy",
+        "dependencies": {}
     }
+    
+    overall_healthy = True
+    
+    try:
+        # Check database connection pool status
+        try:
+            from app.core.config import get_config
+            config = get_config()
+            
+            # Test database connection via connection pool using connection URL
+            import asyncpg
+            async with asyncpg.create_pool(
+                config.user_settings_database_url,
+                min_size=1,
+                max_size=2,
+                command_timeout=5
+            ) as pool:
+                async with pool.acquire() as conn:
+                    await conn.fetchval("SELECT 1")
+            
+            health_status["dependencies"]["database"] = {
+                "status": "healthy",
+                "message": "Connection pool operational"
+            }
+        except Exception as e:
+            health_status["dependencies"]["database"] = {
+                "status": "unhealthy",
+                "message": f"Database connection failed: {str(e)}"
+            }
+            overall_healthy = False
+        
+        # Check trade engine initialization
+        if trade_engine is not None:
+            health_status["dependencies"]["trade_engine"] = {
+                "status": "healthy",
+                "message": "Trade engine initialized"
+            }
+        else:
+            health_status["dependencies"]["trade_engine"] = {
+                "status": "unhealthy",
+                "message": "Trade engine not initialized"
+            }
+            overall_healthy = False
+        
+        # Check circuit breaker manager
+        if circuit_breaker_manager is not None:
+            health_status["dependencies"]["circuit_breaker"] = {
+                "status": "healthy",
+                "message": "Circuit breaker manager active"
+            }
+        else:
+            health_status["dependencies"]["circuit_breaker"] = {
+                "status": "unhealthy",
+                "message": "Circuit breaker manager not initialized"
+            }
+            overall_healthy = False
+        
+        # Check audit logger
+        if audit_logger is not None:
+            health_status["dependencies"]["audit_logger"] = {
+                "status": "healthy",
+                "message": "Audit logger active"
+            }
+        else:
+            health_status["dependencies"]["audit_logger"] = {
+                "status": "unhealthy",
+                "message": "Audit logger not initialized"
+            }
+            overall_healthy = False
+        
+        # Check background bot service
+        try:
+            service_status = background_bot_service.get_service_status()
+            if service_status.get("is_initialized", False):
+                health_status["dependencies"]["background_service"] = {
+                    "status": "healthy",
+                    "message": "Background bot service operational"
+                }
+            else:
+                health_status["dependencies"]["background_service"] = {
+                    "status": "degraded",
+                    "message": "Background service not fully initialized"
+                }
+        except Exception as e:
+            health_status["dependencies"]["background_service"] = {
+                "status": "unhealthy",
+                "message": f"Background service check failed: {str(e)}"
+            }
+            overall_healthy = False
+        
+        # Set overall status
+        if overall_healthy:
+            health_status["status"] = "healthy"
+            return health_status
+        else:
+            health_status["status"] = "unhealthy"
+            raise HTTPException(status_code=503, detail=health_status)
+            
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 503)
+        raise
+    except Exception as e:
+        # Handle any unexpected errors
+        health_status["status"] = "unhealthy"
+        health_status["error"] = f"Health check failed: {str(e)}"
+        raise HTTPException(status_code=503, detail=health_status)
+
+@app.get("/api/v1/service/background-status")
+async def get_background_service_status(api_key: str = Depends(validate_api_key)):
+    """Get background bot service status"""
+    try:
+        service_status = background_bot_service.get_service_status()
+        return {
+            "background_service": service_status,
+            "persistent_bot_management": background_service_initialized,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to get background service status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Bot Status API
 @app.get("/api/v1/bot/status/{user_id}", response_model=BotStatusResponse)
@@ -203,6 +394,53 @@ async def get_bot_status(
         logging.getLogger(__name__).error(f"Failed to get bot status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Get Bot Configuration  
+@app.get("/api/v1/bot/configuration/{user_id}")
+async def get_bot_configuration(
+    user_id: str,
+    api_key: str = Depends(validate_api_key)
+):
+    """Get current bot configuration for a user - PERMANENT SOLUTION: Supports bidirectional sync"""
+    try:
+        if not trade_engine:
+            raise HTTPException(status_code=503, detail="Bot service not initialized")
+            
+        # Get current configuration from trade engine
+        if user_id not in trade_engine.user_bots:
+            # Return default configuration if user not found
+            default_config = {
+                "risk_profile": "moderate",
+                "slippage_tolerance": 1.0,
+                "enabled": True,
+                "max_trade_amount": 10000,
+                "_source": "default"
+            }
+            return {
+                "success": True,
+                "configuration": default_config,
+                "user_id": user_id,
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        bot_state = trade_engine.user_bots[user_id]
+        current_config = bot_state.configuration.copy()
+        current_config["_source"] = "bot_service"
+        current_config["_last_updated"] = bot_state.last_execution.isoformat() if bot_state.last_execution else datetime.now().isoformat()
+        
+        logging.getLogger(__name__).info(f"PERMANENT SOLUTION: Retrieved bot configuration for user {user_id}")
+        
+        return {
+            "success": True,
+            "configuration": current_config,
+            "user_id": user_id,
+            "status": bot_state.status,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to get bot configuration: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Update Bot Configuration
 @app.put("/api/v1/bot/configuration/{user_id}")
 async def update_bot_configuration(
@@ -215,18 +453,21 @@ async def update_bot_configuration(
         if not trade_engine:
             raise HTTPException(status_code=503, detail="Bot service not initialized")
         
-        # Convert to dict and filter None values
-        config_dict = {k: v for k, v in config.dict().items() if v is not None}
+        # Convert to dict and filter None values (fix Pydantic deprecation)
+        config_dict = {k: v for k, v in config.model_dump().items() if v is not None}
         
         # Update configuration
         await trade_engine.update_user_configuration(user_id, config_dict)
         
-        # Log the configuration update
+        # Log the configuration update with correct parameters
         if audit_logger:
             await audit_logger.log_configuration_update(
                 user_id=user_id,
-                updates=config_dict,
-                source="frontend_api"
+                wallet_address=user_id,  # Use user_id as wallet_address for now
+                old_config={},  # We don't track old config yet
+                new_config=config_dict,
+                config_changes=list(config_dict.keys()),
+                update_reason="Bot configuration update via API"
             )
         
         return {
@@ -418,6 +659,101 @@ async def stop_bot(
         
     except Exception as e:
         logging.getLogger(__name__).error(f"Failed to stop bot: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Continuous Scheduler Management
+@app.post("/api/v1/scheduler/start")
+async def start_scheduler(api_key: str = Depends(validate_api_key)):
+    """Start the continuous trading scheduler (5-minute XORJ logic cycles)"""
+    global scheduler_instance, scheduler_task
+    
+    try:
+        if not scheduler_instance:
+            raise HTTPException(status_code=503, detail="Scheduler not initialized")
+        
+        if scheduler_task and not scheduler_task.done():
+            return {
+                "success": False,
+                "message": "Scheduler is already running",
+                "status": "running",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Start the scheduler in a background task
+        scheduler_task = asyncio.create_task(scheduler_instance.start())
+        
+        return {
+            "success": True,
+            "message": "Continuous trading scheduler started successfully",
+            "status": "running",
+            "interval_seconds": scheduler_instance.execution_interval_seconds,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to start scheduler: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/scheduler/stop")
+async def stop_scheduler(api_key: str = Depends(validate_api_key)):
+    """Stop the continuous trading scheduler"""
+    global scheduler_instance, scheduler_task
+    
+    try:
+        if not scheduler_instance:
+            raise HTTPException(status_code=503, detail="Scheduler not initialized")
+        
+        if scheduler_task and not scheduler_task.done():
+            scheduler_task.cancel()
+            try:
+                await scheduler_task
+            except asyncio.CancelledError:
+                pass
+        
+        await scheduler_instance.shutdown()
+        
+        return {
+            "success": True,
+            "message": "Continuous trading scheduler stopped successfully",
+            "status": "stopped",
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to stop scheduler: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/scheduler/status")
+async def get_scheduler_status(api_key: str = Depends(validate_api_key)):
+    """Get continuous scheduler status and statistics"""
+    global scheduler_instance, scheduler_task
+    
+    try:
+        if not scheduler_instance:
+            raise HTTPException(status_code=503, detail="Scheduler not initialized")
+        
+        status = scheduler_instance.get_status()
+        
+        # Add task status
+        task_status = "stopped"
+        if scheduler_task and not scheduler_task.done():
+            if scheduler_task.cancelled():
+                task_status = "cancelled"
+            else:
+                task_status = "running"
+        elif scheduler_task and scheduler_task.done():
+            if scheduler_task.exception():
+                task_status = "error"
+            else:
+                task_status = "completed"
+        
+        status["task_status"] = task_status
+        status["timestamp"] = datetime.now().isoformat()
+        
+        return status
+        
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to get scheduler status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

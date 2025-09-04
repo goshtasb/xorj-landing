@@ -9,7 +9,7 @@
  * - Handling orphaned trades and jobs
  */
 
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection } from '@solana/web3.js';
 import { botStateMachine, BotState, BotEvent, BotStateContext } from './botStateMachine';
 import { TradeService, ExecutionJobService } from './botStateService';
 import { ServiceResponse } from '../types/database';
@@ -29,18 +29,35 @@ export interface RecoveryStatus {
   recoveryTime: number; // milliseconds
 }
 
+export interface RecoveryMetadata {
+  tradeId?: string;
+  jobId?: string;
+  signature?: string;
+  blockNumber?: number;
+  confirmationCount?: number;
+  error?: string;
+}
+
+export interface BlockchainStatus {
+  confirmed: boolean;
+  confirmations: number;
+  blockNumber?: number;
+  slot?: number;
+  error?: string;
+}
+
 export interface RecoveryAction {
   type: 'STATE_RESTORED' | 'TRADE_UPDATED' | 'JOB_COMPLETED' | 'BLOCKCHAIN_VERIFIED' | 'ORPHAN_CLEANED';
   description: string;
   timestamp: Date;
-  metadata?: Record<string, any>;
+  metadata?: RecoveryMetadata;
 }
 
 export interface PendingTransaction {
   tradeId: string;
   signature: string;
   status: 'PENDING' | 'CONFIRMED' | 'FAILED' | 'NOT_FOUND';
-  blockchainStatus?: any;
+  blockchainStatus?: BlockchainStatus;
   age: number; // milliseconds since creation
 }
 
@@ -168,7 +185,7 @@ export class BotRecoveryService {
   /**
    * Identify trades that are pending blockchain confirmation
    */
-  private async identifyPendingTrades(userId: string): Promise<any[]> {
+  private async identifyPendingTrades(userId: string): Promise<unknown[]> {
     try {
       // Get all submitted trades for this user that might need verification
       const submittedTrades = await TradeService.getAll({
@@ -208,7 +225,7 @@ export class BotRecoveryService {
   /**
    * Verify transaction status on Solana blockchain
    */
-  private async verifyPendingTransactions(pendingTrades: any[]): Promise<PendingTransaction[]> {
+  private async verifyPendingTransactions(pendingTrades: unknown[]): Promise<PendingTransaction[]> {
     const verificationResults: PendingTransaction[] = [];
 
     for (const trade of pendingTrades) {
@@ -342,7 +359,7 @@ export class BotRecoveryService {
   /**
    * Identify orphaned execution jobs that need cleanup
    */
-  private async identifyOrphanedJobs(): Promise<any[]> {
+  private async identifyOrphanedJobs(): Promise<unknown[]> {
     try {
       const activeJobs = await ExecutionJobService.getActive();
       
@@ -367,7 +384,7 @@ export class BotRecoveryService {
   /**
    * Cleanup orphaned execution jobs
    */
-  private async cleanupOrphanedJob(job: any, recoveryStatus: RecoveryStatus): Promise<void> {
+  private async cleanupOrphanedJob(job: unknown, recoveryStatus: RecoveryStatus): Promise<void> {
     try {
       // Mark orphaned job as completed with timeout error
       await ExecutionJobService.update(job.id, {
@@ -395,6 +412,7 @@ export class BotRecoveryService {
    */
   private async restoreBotState(
     currentState: BotStateContext, 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     recoveryStatus: RecoveryStatus
   ): Promise<BotStateContext> {
     try {

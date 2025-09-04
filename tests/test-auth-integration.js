@@ -1,4 +1,64 @@
 const jwt = require('jsonwebtoken');
+const nacl = require('tweetnacl');
+const { PublicKey } = require('@solana/web3.js');
+
+// Test signature verification logic
+function testSignatureVerification() {
+  console.log('🔐 Testing signature verification logic...\n');
+
+  try {
+    // Generate a keypair for testing
+    const keypair = nacl.sign.keyPair();
+    const publicKey = new PublicKey(keypair.publicKey);
+    const message = 'Test authentication message';
+    const messageBytes = Buffer.from(message, 'utf8');
+
+    // Sign the message
+    const signature = nacl.sign.detached(messageBytes, keypair.secretKey);
+    const signatureBase64 = Buffer.from(signature).toString('base64');
+
+    console.log('1️⃣ Generated test signature');
+    console.log('   Public Key:', publicKey.toString());
+    console.log('   Message:', message);
+    console.log('   Signature:', signatureBase64.substring(0, 20) + '...');
+
+    // Verify the signature (this is what our API does)
+    const isValid = nacl.sign.detached.verify(
+      messageBytes,
+      signature,
+      keypair.publicKey
+    );
+
+    if (isValid) {
+      console.log('✅ Signature verification: PASSED');
+    } else {
+      console.log('❌ Signature verification: FAILED');
+      return false;
+    }
+
+    // Test with wrong signature
+    const wrongSignature = nacl.sign.detached(Buffer.from('wrong message', 'utf8'), keypair.secretKey);
+    const isWrongValid = nacl.sign.detached.verify(
+      messageBytes,
+      wrongSignature,
+      keypair.publicKey
+    );
+
+    if (!isWrongValid) {
+      console.log('✅ Wrong signature rejection: PASSED');
+    } else {
+      console.log('❌ Wrong signature rejection: FAILED');
+      return false;
+    }
+
+    console.log('🎉 All signature verification tests passed!\n');
+    return true;
+
+  } catch (error) {
+    console.error('❌ Signature verification test failed:', error.message);
+    return false;
+  }
+}
 
 // Test complete authentication flow with database integration
 async function testAuthenticationIntegration() {
@@ -122,4 +182,19 @@ async function testAuthenticationIntegration() {
   }
 }
 
-testAuthenticationIntegration();
+// Run signature verification test first
+console.log('🚀 Starting XORJ Authentication Tests...\n');
+
+if (!testSignatureVerification()) {
+  console.error('❌ Signature verification tests failed!');
+  process.exit(1);
+}
+
+// Only run integration test if server is expected to be running
+if (process.env.RUN_INTEGRATION_TESTS === 'true') {
+  console.log('🔗 Running integration tests...');
+  testAuthenticationIntegration();
+} else {
+  console.log('ℹ️  Skipping integration tests (server not running)');
+  console.log('   Set RUN_INTEGRATION_TESTS=true to run full integration tests');
+}

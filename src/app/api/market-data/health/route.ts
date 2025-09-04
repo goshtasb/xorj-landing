@@ -3,11 +3,11 @@
  * Monitor real-time price feeds and validation systems
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { marketDataService } from '@/lib/marketData';
 import { priceValidator } from '@/lib/priceValidation';
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   const startTime = Date.now();
   
   try {

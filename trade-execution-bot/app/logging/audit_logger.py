@@ -246,9 +246,10 @@ class ImmutableAuditLogger:
             # Create connection pool
             self.pool = await asyncpg.create_pool(
                 self.database_url,
-                min_size=2,
-                max_size=5,
+                min_size=5,
+                max_size=30,  # Increased for high-traffic logging
                 command_timeout=30.0,
+                max_inactive_connection_lifetime=300.0,  # 5 minutes
                 server_settings={
                     'application_name': f"{self.config.service_name}-audit",
                     'timezone': 'UTC'
@@ -1015,6 +1016,231 @@ class ImmutableAuditLogger:
         )
         
         return await self._write_audit_entry(entry)
+    
+    async def log_configuration_update(
+        self,
+        user_id: str,
+        wallet_address: str,
+        old_config: Dict[str, Any],
+        new_config: Dict[str, Any],
+        config_changes: List[str],
+        update_reason: str = "User configuration update"
+    ) -> bool:
+        """
+        Log bot configuration updates for audit trail.
+        
+        Args:
+            user_id: User ID whose configuration was updated
+            wallet_address: User's wallet address
+            old_config: Previous configuration values
+            new_config: New configuration values
+            config_changes: List of configuration fields that changed
+            update_reason: Reason for the configuration update
+            
+        Returns:
+            bool: True if logged successfully
+        """
+        entry = AuditLogEntry(
+            entry_id=str(uuid.uuid4()),
+            timestamp=datetime.now(timezone.utc),
+            event_type=AuditEventType.SYSTEM_EVENT,
+            severity=AuditSeverity.INFO,
+            user_id=user_id,
+            wallet_address=wallet_address,
+            event_data={
+                "configuration_update": True,
+                "old_config": old_config,
+                "new_config": new_config,
+                "config_changes": config_changes,
+                "update_timestamp": datetime.now(timezone.utc).isoformat()
+            },
+            decision_rationale=update_reason,
+            context_snapshot={
+                "configuration_before": old_config,
+                "configuration_after": new_config,
+                "changed_fields": config_changes
+            },
+            previous_entry_hash=self.last_entry_hash
+        )
+        
+        return await self._write_audit_entry(entry)
+    
+    async def get_performance_metrics(self, user_id: str) -> Dict[str, Any]:
+        """
+        Get performance metrics for a user from audit logs.
+        
+        Args:
+            user_id: User identifier to get metrics for
+            
+        Returns:
+            Dict containing performance metrics
+        """
+        try:
+            async with self.pool.acquire() as conn:
+                # Get trade metrics from audit logs
+                trade_query = f"""
+                    SELECT 
+                        event_type,
+                        severity,
+                        trade_details,
+                        performance_metrics,
+                        timestamp
+                    FROM {self.table_name}
+                    WHERE user_id = $1 
+                    AND event_type IN ('trade_executed', 'trade_failed')
+                    AND timestamp >= NOW() - INTERVAL '30 days'
+                    ORDER BY timestamp DESC
+                    LIMIT 1000
+                """
+                
+                trades = await conn.fetch(trade_query, user_id)
+                
+                if not trades:
+                    return {
+                        "total_trades": 0,
+                        "successful_trades": 0,
+                        "success_rate": 0.0,
+                        "average_slippage": 0.0,
+                        "total_volume_usd": 0.0,
+                        "period_days": 30
+                    }
+                
+                # Process trade data
+                total_trades = len(trades)
+                successful_trades = sum(1 for t in trades if t['event_type'] == 'trade_executed')
+                success_rate = (successful_trades / total_trades * 100) if total_trades > 0 else 0
+                
+                # Extract volume and slippage from trade details
+                total_volume = 0.0
+                total_slippage = 0.0
+                slippage_count = 0
+                
+                for trade in trades:
+                    if trade['trade_details']:
+                        details = json.loads(trade['trade_details']) if isinstance(trade['trade_details'], str) else trade['trade_details']
+                        
+                        # Extract volume
+                        if 'from_amount_usd' in details:
+                            total_volume += float(details['from_amount_usd'])
+                        elif 'from_amount' in details:
+                            # Assume reasonable USD conversion for demo
+                            total_volume += float(details['from_amount']) * 200  # Rough SOL price
+                        
+                        # Extract slippage
+                        if 'actual_slippage' in details:
+                            total_slippage += float(details['actual_slippage'])
+                            slippage_count += 1
+                
+                avg_slippage = (total_slippage / slippage_count) if slippage_count > 0 else 0.0
+                
+                return {
+                    "total_trades": total_trades,
+                    "successful_trades": successful_trades,
+                    "success_rate": round(success_rate, 1),
+                    "average_slippage": round(avg_slippage, 3),
+                    "total_volume_usd": round(total_volume, 2),
+                    "period_days": 30
+                }
+                
+        except Exception as e:
+            logger.error(
+                "Failed to get performance metrics from audit logs",
+                user_id=user_id,
+                error=str(e)
+            )
+            # Return safe fallback metrics
+            return {
+                "total_trades": 0,
+                "successful_trades": 0,
+                "success_rate": 0.0,
+                "average_slippage": 0.0,
+                "total_volume_usd": 0.0,
+                "period_days": 30,
+                "error": "Failed to retrieve metrics"
+            }
+    
+    async def get_user_trade_history(self, user_id: str, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+        """
+        Get trade history for a user from audit logs.
+        
+        Args:
+            user_id: User identifier
+            limit: Maximum number of trades to return
+            offset: Number of trades to skip
+            
+        Returns:
+            List of trade history records
+        """
+        try:
+            async with self.pool.acquire() as conn:
+                query = f"""
+                    SELECT 
+                        entry_id as trade_id,
+                        timestamp,
+                        event_type,
+                        trade_details,
+                        transaction_signature,
+                        error_message,
+                        severity
+                    FROM {self.table_name}
+                    WHERE user_id = $1 
+                    AND event_type IN ('trade_executed', 'trade_failed', 'trade_generated')
+                    ORDER BY timestamp DESC
+                    LIMIT $2 OFFSET $3
+                """
+                
+                rows = await conn.fetch(query, user_id, limit, offset)
+                
+                trades = []
+                for row in rows:
+                    trade_data = {
+                        "trade_id": row['entry_id'],
+                        "timestamp": row['timestamp'].isoformat(),
+                        "status": "confirmed" if row['event_type'] == 'trade_executed' else 
+                                 "failed" if row['event_type'] == 'trade_failed' else "pending",
+                        "transaction_signature": row['transaction_signature'],
+                        "error_message": row['error_message']
+                    }
+                    
+                    # Parse trade details if available
+                    if row['trade_details']:
+                        details = json.loads(row['trade_details']) if isinstance(row['trade_details'], str) else row['trade_details']
+                        trade_data.update({
+                            "from_token": details.get('from_token', 'UNKNOWN'),
+                            "to_token": details.get('to_token', 'UNKNOWN'),
+                            "from_amount": details.get('from_amount', 0),
+                            "to_amount": details.get('to_amount', 0),
+                            "slippage_realized": details.get('actual_slippage', 0),
+                            "execution_time_ms": details.get('execution_time_ms', 0),
+                            "rationale": details.get('rationale', 'No rationale provided'),
+                            "risk_score": details.get('risk_score', 0),
+                            "confidence_score": details.get('confidence_score', 0)
+                        })
+                    else:
+                        # Default values for missing trade details
+                        trade_data.update({
+                            "from_token": "UNKNOWN",
+                            "to_token": "UNKNOWN", 
+                            "from_amount": 0,
+                            "to_amount": 0,
+                            "slippage_realized": 0,
+                            "execution_time_ms": 0,
+                            "rationale": "No trade details available",
+                            "risk_score": 0,
+                            "confidence_score": 0
+                        })
+                    
+                    trades.append(trade_data)
+                
+                return trades
+                
+        except Exception as e:
+            logger.error(
+                "Failed to get trade history from audit logs",
+                user_id=user_id,
+                error=str(e)
+            )
+            return []
     
     async def close(self):
         """Close audit logging system and connection pool."""

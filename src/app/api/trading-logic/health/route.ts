@@ -3,10 +3,10 @@
  * Monitor the signal processing pipeline and service status
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { tradingLogicService } from '@/lib/tradingLogic';
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   const startTime = Date.now();
   
   try {

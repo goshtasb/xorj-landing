@@ -4,7 +4,7 @@ Trade Schema Definitions
 
 from typing import Dict, Any, Optional, List
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from enum import Enum
 
 class TradeStatus(str, Enum):
@@ -24,23 +24,8 @@ class TradeType(str, Enum):
 
 class GeneratedTrade(BaseModel):
     """AI-generated trade recommendation"""
-    trade_id: str = Field(..., description="Unique trade identifier")
-    user_id: str = Field(..., description="User identifier")
-    trade_type: TradeType = Field(..., description="Type of trade")
-    from_token: str = Field(..., description="Source token symbol")
-    to_token: str = Field(..., description="Target token symbol")
-    from_amount: float = Field(..., gt=0, description="Amount to trade from")
-    to_amount_expected: float = Field(..., gt=0, description="Expected amount to receive")
-    slippage_tolerance: float = Field(..., ge=0, le=10, description="Allowed slippage %")
-    rationale: str = Field(..., description="AI reasoning for this trade")
-    confidence_score: float = Field(..., ge=0, le=1, description="AI confidence level")
-    risk_score: int = Field(..., ge=1, le=100, description="Risk assessment score")
-    priority: int = Field(default=1, ge=1, le=10, description="Execution priority")
-    expires_at: Optional[datetime] = Field(None, description="Trade expiration time")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional trade metadata")
-    
-    class Config:
-        schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "trade_id": "trade_123456789",
                 "user_id": "user_abc",
@@ -56,6 +41,22 @@ class GeneratedTrade(BaseModel):
                 "priority": 3
             }
         }
+    )
+    
+    trade_id: str = Field(..., description="Unique trade identifier")
+    user_id: str = Field(..., description="User identifier")
+    trade_type: TradeType = Field(..., description="Type of trade")
+    from_token: str = Field(..., description="Source token symbol")
+    to_token: str = Field(..., description="Target token symbol")
+    from_amount: float = Field(..., gt=0, description="Amount to trade from")
+    to_amount_expected: float = Field(..., gt=0, description="Expected amount to receive")
+    slippage_tolerance: float = Field(..., ge=0, le=10, description="Allowed slippage %")
+    rationale: str = Field(..., description="AI reasoning for this trade")
+    confidence_score: float = Field(..., ge=0, le=1, description="AI confidence level")
+    risk_score: int = Field(..., ge=1, le=100, description="Risk assessment score")
+    priority: int = Field(default=1, ge=1, le=10, description="Execution priority")
+    expires_at: Optional[datetime] = Field(None, description="Trade expiration time")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional trade metadata")
 
 class TradeExecutionRequest(BaseModel):
     """Request to execute a trade"""

@@ -8,17 +8,44 @@ import { validateRequestBody, createErrorResponse, createSuccessResponse } from 
 import { query } from '@/lib/database';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import { secureEnv } from '@/lib/security/envInit';
+import { PublicKey } from '@solana/web3.js';
+import nacl from 'tweetnacl';
+import { Buffer } from 'buffer';
 
 const LoginRequestSchema = z.object({
   wallet_address: z.string().min(32).max(50),
-  signature: z.string().optional(), // For development, signature is optional
-  message: z.string().optional()
+  signature: z.string().min(1), // Base58 encoded signature
+  message: z.string().min(1) // Message that was signed - required for verification
 });
 
-const JWT_SECRET = process.env.JWT_SECRET;
-
-if (!JWT_SECRET) {
-  throw new Error('JWT_SECRET environment variable is required but not set');
+/**
+ * Verify Solana wallet signature using ed25519
+ * @param publicKeyString - Base58 encoded public key (wallet address)
+ * @param signature - Base58 encoded signature
+ * @param message - Original message that was signed
+ * @returns boolean indicating if signature is valid
+ */
+function verifySignature(publicKeyString: string, signature: string, message: string): boolean {
+  try {
+    // Decode the public key
+    const publicKey = new PublicKey(publicKeyString);
+    const publicKeyBytes = publicKey.toBytes();
+    
+    // Decode the signature from base58
+    const signatureBytes = Buffer.from(signature, 'base64');
+    
+    // Convert message to bytes
+    const messageBytes = new TextEncoder().encode(message);
+    
+    // Verify the signature using ed25519
+    const isValid = nacl.sign.detached.verify(messageBytes, signatureBytes, publicKeyBytes);
+    
+    return isValid;
+  } catch (error) {
+    console.error('❌ Signature verification error:', error);
+    return false;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -29,24 +56,24 @@ export async function POST(request: NextRequest) {
       return validation.response;
     }
     
-    const { wallet_address, signature } = validation.data;
+    const { wallet_address, signature, message } = validation.data;
 
     console.log(`🔐 Login attempt for wallet: ${wallet_address}`);
 
-    // In a real implementation, you would:
-    // 1. Verify the signature against the message
-    // 2. Check if the wallet is authorized
-    // 3. Rate limit login attempts
+    // SECURITY FIX: Implement proper signature verification
+    const isSignatureValid = verifySignature(wallet_address, signature, message);
     
-    // For development, we'll skip signature verification
-    if (process.env.NODE_ENV === 'production' && !signature) {
+    if (!isSignatureValid) {
+      console.log(`❌ Invalid signature for wallet: ${wallet_address}`);
       return createErrorResponse(
-        'AUTHENTICATION_ERROR',
-        'Signature required for production environment',
-        'Must provide valid signature for wallet verification',
+        'INVALID_SIGNATURE',
+        'Authentication failed',
+        'Invalid wallet signature provided',
         401
       );
     }
+    
+    console.log(`✅ Valid signature verified for wallet: ${wallet_address}`);
 
     // Check/create user in database
     try {
@@ -73,7 +100,19 @@ export async function POST(request: NextRequest) {
         console.log(`👤 Existing user login: ${wallet_address}`);
       }
 
-      // Generate JWT token
+      // Generate JWT token using secure environment
+      const envConfig = secureEnv.getConfig();
+      
+      if (!envConfig.isValid || !envConfig.config.jwt.secret) {
+        console.error('❌ JWT configuration invalid during token generation');
+        return createErrorResponse(
+          'INTERNAL_ERROR',
+          'Authentication service unavailable',
+          'Unable to generate authentication token',
+          503
+        );
+      }
+
       const token = jwt.sign(
         { 
           wallet_address: wallet_address,
@@ -81,17 +120,30 @@ export async function POST(request: NextRequest) {
           iat: Math.floor(Date.now() / 1000),
           exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60) // 24 hours
         },
-        JWT_SECRET,
-        { algorithm: 'HS256' }
+        envConfig.config.jwt.secret,
+        { algorithm: envConfig.config.jwt.algorithm as jwt.Algorithm }
       );
 
       console.log(`✅ JWT token generated for: ${wallet_address}`);
 
-      return createSuccessResponse({
-        token,
+      // SECURITY FIX: Phase 2 - Set token as secure httpOnly cookie instead of returning it
+      const response = createSuccessResponse({
+        authenticated: true,
         wallet_address: user.wallet_address,
-        user_created: !existingUser.rows.length
+        user_created: !existingUser.rows.length,
+        session_expires_at: new Date((Math.floor(Date.now() / 1000) + (24 * 60 * 60)) * 1000).toISOString()
       });
+
+      // Set secure httpOnly cookie
+      response.cookies.set('xorj_session_token', token, {
+        httpOnly: true, // Prevents XSS attacks
+        secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+        sameSite: 'strict', // Prevents CSRF attacks
+        maxAge: 24 * 60 * 60, // 24 hours in seconds
+        path: '/', // Available for all routes
+      });
+
+      return response;
 
     } catch (dbError) {
       console.error('❌ Database error during login:', dbError);

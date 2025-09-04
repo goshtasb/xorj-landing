@@ -400,10 +400,10 @@ export const convertToApiFormat = (dbTrade: Trade): CompatibleTrade => {
 };
 
 // Convert from trading system format
-export const convertFromTradingSystem = (tradeRequest: TradeRequest): NewTrade => ({
+export const convertFromTradingSystem = async (tradeRequest: TradeRequest): Promise<NewTrade> => ({
   userId: tradeRequest.userId,
   jobId: tradeRequest.jobId,
-  clientOrderId: tradeRequest.clientOrderId || generateClientOrderId(tradeRequest),
+  clientOrderId: tradeRequest.clientOrderId || await generateClientOrderId(tradeRequest),
   symbol: tradeRequest.symbol,
   side: tradeRequest.side,
   quantity: tradeRequest.quantity,
@@ -415,7 +415,7 @@ export const convertFromTradingSystem = (tradeRequest: TradeRequest): NewTrade =
 });
 
 // Generate client order ID for idempotency if not provided
-const generateClientOrderId = (tradeRequest: TradeRequest): string => {
+const generateClientOrderId = async (tradeRequest: TradeRequest): Promise<string> => {
   // Create deterministic time window (rounds to nearest 5 minutes)
   const now = new Date();
   const timeWindow = Math.floor(now.getTime() / (5 * 60 * 1000));
@@ -430,7 +430,7 @@ const generateClientOrderId = (tradeRequest: TradeRequest): string => {
   ].join('|');
   
   // Generate SHA-256 hash for deterministic idempotency
-  const crypto = require('crypto');
+  const crypto = await import('crypto');
   const hash = crypto.createHash('sha256').update(inputString).digest('hex');
   
   // Use first 32 chars for reasonable length while maintaining uniqueness

@@ -132,11 +132,11 @@ class SystemOrchestrator:
         self.user_settings = UserSettingsClient()
         self.audit_logger = get_audit_logger()
         
-        # Initialize core components (FR-1 through FR-4)
-        self.strategy_selector = get_strategy_selector()  # FR-1: Strategy Ingestion
-        self.solana_client = get_solana_client()          # FR-2: Portfolio Reading
-        self.trade_generator = get_trade_generator()      # FR-3: Trade Generation
-        self.trade_executor = get_trade_executor()        # FR-4: Trade Execution
+        # Initialize core components (FR-1 through FR-4) - will be properly initialized in async initialize()
+        self.strategy_selector = get_strategy_selector()  # FR-1: Strategy Ingestion (sync)
+        self.solana_client = None                         # FR-2: Portfolio Reading (async - initialized later)
+        self.trade_generator = get_trade_generator()      # FR-3: Trade Generation (sync)
+        self.trade_executor = None                        # FR-4: Trade Execution (async - initialized later)
         
         # System state (reset on each cycle)
         self.current_cycle_id: Optional[str] = None
@@ -169,6 +169,10 @@ class SystemOrchestrator:
                 )
                 return False
             
+            # Initialize async components that weren't initialized in constructor
+            self.solana_client = await get_solana_client()  # Now properly await the async getter
+            self.trade_executor = await get_trade_executor()  # Now properly await the async getter
+            
             # Initialize Solana client for blockchain interactions
             if not await self.solana_client.initialize():
                 await self.audit_logger.log_error_event(
@@ -178,8 +182,11 @@ class SystemOrchestrator:
                 )
                 return False
             
+            # Initialize trade generator async components
+            await self.trade_generator.initialize()
+            
             # Validate production configuration if in production
-            if self.config.is_production():
+            if self.config.is_production:
                 try:
                     self.config.validate_production_config()
                     logger.info("Production configuration validated successfully")
@@ -1004,9 +1011,9 @@ class SystemOrchestrator:
                     user_risk_profile=target_portfolio.user_risk_profile.value
                 )
                 
-                # For this implementation, we'll derive user info from target portfolio
-                # In production, target portfolio would contain user vault address
-                vault_address = f"vault_for_{target_portfolio.trader_wallet_address[:8]}"
+                # For this implementation, we'll use the trader's wallet as vault address for testing
+                # In production, this would be a proper program-derived address (PDA)
+                vault_address = target_portfolio.trader_wallet_address
                 user_id = f"user_{target_portfolio.trader_wallet_address[:8]}"
                 
                 current_portfolio = await self.solana_client.read_vault_holdings(

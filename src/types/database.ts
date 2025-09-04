@@ -92,7 +92,7 @@ export interface Trade extends BaseEntity {
 }
 
 export interface CreateTradeData {
-  job_id: string;
+  job_id: string | null;
   user_vault_address: string;
   client_order_id: string; // Required idempotency key for duplicate prevention
   status: TradeStatus;

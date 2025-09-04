@@ -223,6 +223,60 @@ export class AdvancedRateLimiter {
   }
 
   /**
+   * Secure client IP detection to prevent header spoofing
+   */
+  private getSecureClientIP(req: NextRequest): string {
+    // Get all possible IP sources
+    const xForwardedFor = req.headers.get('x-forwarded-for');
+    const xRealIp = req.headers.get('x-real-ip');
+    const cfConnectingIp = req.headers.get('cf-connecting-ip'); // Cloudflare
+    const trueClientIp = req.headers.get('true-client-ip'); // Cloudflare Enterprise
+    
+    // If we're behind Cloudflare, prefer CF headers (most reliable)
+    if (cfConnectingIp) {
+      return this.sanitizeIP(cfConnectingIp);
+    }
+    
+    if (trueClientIp) {
+      return this.sanitizeIP(trueClientIp);
+    }
+    
+    // For trusted environments, use X-Real-IP
+    if (xRealIp && process.env.TRUST_PROXY === 'true') {
+      return this.sanitizeIP(xRealIp);
+    }
+    
+    // Parse X-Forwarded-For carefully (use leftmost IP which is the original client)
+    if (xForwardedFor) {
+      const ips = xForwardedFor.split(',').map(ip => ip.trim());
+      if (ips.length > 0) {
+        return this.sanitizeIP(ips[0]);
+      }
+    }
+    
+    // Fallback
+    return 'unknown-ip';
+  }
+  
+  /**
+   * Sanitize and validate IP address to prevent injection
+   */
+  private sanitizeIP(ip: string): string {
+    // Remove any suspicious characters and validate format
+    const cleaned = ip.replace(/[^0-9a-fA-F:.]/g, '');
+    
+    // Basic IPv4/IPv6 format validation
+    const isIPv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(cleaned);
+    const isIPv6 = /^[0-9a-fA-F:]+$/.test(cleaned);
+    
+    if (isIPv4 || isIPv6) {
+      return cleaned;
+    }
+    
+    return 'invalid-ip';
+  }
+
+  /**
    * Generate unique identifier for rate limiting
    */
   private generateIdentifier(req: NextRequest, config: RateLimitConfig): string {
@@ -230,13 +284,8 @@ export class AdvancedRateLimiter {
       return config.keyGenerator(req);
     }
 
-    // Try to get real IP address
-    const forwarded = req.headers.get('x-forwarded-for');
-    const realIp = req.headers.get('x-real-ip');
-    const cfConnectingIp = req.headers.get('cf-connecting-ip');
-    
-    const ip = cfConnectingIp || realIp || forwarded?.split(',')[0] || 
-              req.headers.get('x-forwarded-for') || 'unknown';
+    // SECURITY FIX: Phase 2 - Secure client IP detection
+    const ip = this.getSecureClientIP(req);
 
     // Include user ID if authenticated
     const authHeader = req.headers.get('authorization');
@@ -390,7 +439,7 @@ export class AdvancedRateLimiter {
       const attackKey = `${this.ATTACK_KEY_PREFIX}${identifier}`;
       const attackData = await this.redis.get(attackKey);
       
-      let patterns: AttackPattern = attackData ? JSON.parse(attackData) : {
+      const patterns: AttackPattern = attackData ? JSON.parse(attackData) : {
         consecutiveFailures: 0,
         rapidRequests: 0,
         suspiciousEndpoints: [],
@@ -458,7 +507,7 @@ export class AdvancedRateLimiter {
   /**
    * Log security incidents
    */
-  private logSecurityIncident(identifier: string, type: string, data: any): void {
+  private logSecurityIncident(identifier: string, type: string, data: unknown): void {
     const incident = {
       timestamp: new Date().toISOString(),
       identifier,

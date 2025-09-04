@@ -184,7 +184,7 @@ async def show_status():
     print(f"  Solana Network: {config.solana_network}")
     
     # Production validation
-    if config.is_production():
+    if config.is_production:
         try:
             validate_production_config()
             print("  Production Config: ✅ VALID")

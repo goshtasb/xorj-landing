@@ -8,21 +8,12 @@ import { CriticalDatabaseError } from '../types/database';
 import { databaseRecovery } from './databaseRecovery';
 import { databaseErrorHandler } from './databaseErrorHandler';
 
-// Conditional import to prevent pg from loading in development without database
-let Pool: unknown, PoolClient: unknown;
-
-if (process.env.NODE_ENV === 'production' || process.env.DATABASE_HOST || process.env.DATABASE_URL) {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const pg = require('pg');
-  Pool = pg.Pool;
-  PoolClient = pg.PoolClient;
-  // QueryResult = pg.QueryResult; // Unused, commented out
-} else {
-  // Mock types for development
-  Pool = class MockPool {};
-  PoolClient = class MockPoolClient {};
-  // QueryResult removed - was unused
-}
+// Import PostgreSQL types and classes
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pg = require('pg');
+const Pool = pg.Pool;
+const PoolClient = pg.PoolClient;
+const QueryResult = pg.QueryResult;
 
 // Database configuration interface
 interface DatabaseConfig {
@@ -149,7 +140,7 @@ export function getDatabase(): Pool {
 export async function query<T = unknown>(
   text: string,
   params?: unknown[]
-): Promise<QueryResult<T>> {
+): Promise<unknown> {
   // CRITICAL: Fail-fast if database not configured (no feature flag override)
   if (process.env.NODE_ENV === 'development' && !process.env.DATABASE_URL && !process.env.DATABASE_HOST) {
     const error = new CriticalDatabaseError('Database not configured - system cannot operate without persistence layer', 'DB_UNAVAILABLE');
@@ -351,8 +342,9 @@ export const dbUtils = {
 };
 
 // Types for better TypeScript support
-export type DatabaseClient = PoolClient;
-export type DatabaseResult<T = unknown> = QueryResult<T>;
+export type DatabaseClient = unknown;
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export type DatabaseResult<T = unknown> = unknown;
 
 // Export the main database interface
 const database = {

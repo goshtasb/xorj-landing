@@ -28,7 +28,7 @@ import { users } from './users';
  * Standardized risk profiles that match the existing API and business logic.
  * These values are validated at both database and application levels.
  */
-export const RISK_PROFILES = ['CONSERVATIVE', 'BALANCED', 'AGGRESSIVE'] as const;
+export const RISK_PROFILES = ['conservative', 'moderate', 'aggressive'] as const;
 export type RiskProfile = typeof RISK_PROFILES[number];
 
 /**
@@ -40,7 +40,7 @@ export type RiskProfile = typeof RISK_PROFILES[number];
  * SQL Equivalent:
  * CREATE TABLE user_settings (
  *   user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
- *   risk_profile TEXT NOT NULL DEFAULT 'BALANCED',
+ *   risk_profile TEXT NOT NULL DEFAULT 'moderate',
  *   updated_at TIMESTAMPTZ
  * );
  */
@@ -54,12 +54,12 @@ export const userSettings = pgTable('user_settings', {
   // Risk profile setting - validated enum
   riskProfile: text('risk_profile', { enum: RISK_PROFILES })
     .notNull()
-    .default('BALANCED'),
+    .default('moderate'),
   
   // Investment amount for trading - decimal with high precision
   investmentAmount: decimal('investment_amount', { precision: 20, scale: 8 })
     .notNull()
-    .default('1000.00'),
+    .default('0.00'),
   
   // Last update timestamp - manually managed for tracking changes
   updatedAt: timestamp('updated_at', { 
@@ -98,7 +98,7 @@ const riskProfileSchema = z.enum(RISK_PROFILES, {
 
 // Investment amount validation schema
 const investmentAmountSchema = z.string().or(z.number()).pipe(
-  z.coerce.number().min(1, "Investment amount must be at least $1")
+  z.coerce.number().min(0, "Investment amount must be at least $0")
     .max(1000000, "Investment amount cannot exceed $1,000,000")
     .refine(val => Number.isFinite(val), "Investment amount must be a valid number")
 );
@@ -149,7 +149,7 @@ export type ValidatedUserSettingsUpdate = z.infer<typeof updateUserSettingsSchem
  */
 export interface CompatibleUserSettings {
   userId: string;
-  riskProfile: 'Conservative' | 'Balanced' | 'Aggressive'; // Existing API format
+  riskProfile: 'conservative' | 'moderate' | 'aggressive'; // Updated to match backend
   investmentAmount?: number; // Investment amount in USD
   updatedAt?: Date;
 }
@@ -162,15 +162,14 @@ export interface CompatibleUserSettings {
  */
 export const convertToApiFormat = (dbSettings: UserSettings): CompatibleUserSettings => ({
   userId: dbSettings.userId,
-  riskProfile: dbSettings.riskProfile.charAt(0).toUpperCase() + 
-               dbSettings.riskProfile.slice(1).toLowerCase() as 'Conservative' | 'Balanced' | 'Aggressive',
+  riskProfile: dbSettings.riskProfile as 'conservative' | 'moderate' | 'aggressive',
   investmentAmount: dbSettings.investmentAmount ? parseFloat(dbSettings.investmentAmount) : undefined,
   updatedAt: dbSettings.updatedAt || undefined
 });
 
 export const convertFromApiFormat = (apiSettings: CompatibleUserSettings): NewUserSettings => ({
   userId: apiSettings.userId,
-  riskProfile: apiSettings.riskProfile.toUpperCase() as RiskProfile,
-  investmentAmount: apiSettings.investmentAmount?.toString() || '1000.00',
+  riskProfile: apiSettings.riskProfile as RiskProfile,
+  investmentAmount: apiSettings.investmentAmount?.toString() || '0.00',
   updatedAt: apiSettings.updatedAt || new Date()
 });

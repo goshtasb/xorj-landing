@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
+import { usePerformantAPI } from '@/lib/performanceControls';
 import { 
   ArrowUpRight, 
   ArrowDownLeft, 
@@ -57,6 +58,7 @@ interface TransactionHistoryTableProps {
 
 export function TransactionHistoryTable({ className = '' }: TransactionHistoryTableProps) {
   const { publicKey } = useWallet();
+  const { smartFetch } = usePerformantAPI();
   
   // State management
   const [data, setData] = useState<PaginatedTransactions | null>(null);
@@ -90,15 +92,8 @@ export function TransactionHistoryTable({ className = '' }: TransactionHistoryTa
         console.log(`📄 Fetching transactions for page ${page}...`);
       }
       
-      const response = await fetch(
-        `/api/user/transactions?walletAddress=${effectivePublicKey}&page=${page}&limit=10`
-      );
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch transactions: ${response.statusText}`);
-      }
-
-      const result = await response.json();
+      const url = `/api/user/transactions?walletAddress=${effectivePublicKey}&page=${page}&limit=10`;
+      const result = await smartFetch(url, {}, `transactions-${effectivePublicKey}-${page}`, 30000);
       
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch transactions');
@@ -132,22 +127,44 @@ export function TransactionHistoryTable({ className = '' }: TransactionHistoryTa
     }
   }, [currentPage, mounted, effectivePublicKey, fetchTransactions]);
 
-  // Live polling for transaction updates
+  // Live polling for transaction updates (reduced frequency and fixed infinite loop)
   useEffect(() => {
     if (!mounted || !effectivePublicKey || !pollingEnabled) return;
 
-    console.log('🔄 Starting live transaction polling...');
+    console.log('🔄 Starting live transaction polling (every 30s)...');
     
     const interval = setInterval(() => {
-      // Only poll the current page silently
-      fetchTransactions(currentPage, true);
-    }, 3000); // Poll every 3 seconds
+      // Create a local fetch function to avoid dependency issues
+      const fetchCurrentPage = async () => {
+        if (!mounted || !effectivePublicKey) return;
+        
+        try {
+          const response = await fetch(
+            `/api/user/transactions?walletAddress=${effectivePublicKey}&page=${currentPage}&limit=10`
+          );
+          
+          if (response.ok) {
+            const result = await response.json();
+            if (result.success) {
+              setData(result.data);
+              setLastUpdateTime(new Date());
+              console.log(`🔄 Auto-refreshed: ${result.data.transactions.length} transactions`);
+            }
+          }
+        } catch (err) {
+          // Silently fail during polling to avoid spam
+          console.warn('⚠️ Polling failed silently:', err);
+        }
+      };
+      
+      fetchCurrentPage();
+    }, 30000); // Poll every 30 seconds instead of 3 seconds
 
     return () => {
       console.log('⏹️ Stopping live transaction polling');
       clearInterval(interval);
     };
-  }, [mounted, effectivePublicKey, currentPage, pollingEnabled, fetchTransactions]);
+  }, [mounted && effectivePublicKey && pollingEnabled]); // PERFORMANCE CONTROLLED: Stable deps with smart polling
 
   // Handle page navigation
   const handlePageChange = (newPage: number) => {

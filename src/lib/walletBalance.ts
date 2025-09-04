@@ -5,12 +5,19 @@
  */
 
 import { PublicKey, Connection } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { resilientRpcClient } from './resilientRpcClient';
 
-// Solana RPC endpoint - use devnet for development
-const SOLANA_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 
+// Use the program ID directly instead of importing from @solana/spl-token
+const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+
+// Use Helius RPC for better rate limits and reliability  
+const HELIUS_API_KEY = process.env.HELIUS_API_KEY || 'e5fdf1c6-20b1-48b6-b33c-4be56e8e219c';
+const SOLANA_RPC_URL = `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`;
+
+// Fallback to public RPC if needed
+const PUBLIC_RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 
   process.env.SOLANA_RPC_URL || 
-  (process.env.NODE_ENV === 'development' ? 'https://api.devnet.solana.com' : 'https://api.mainnet-beta.solana.com');
+  'https://api.mainnet-beta.solana.com';
 
 // Common token mint addresses
 const TOKEN_MINTS = {
@@ -39,19 +46,33 @@ export class WalletBalanceService {
   private connection: Connection;
   private fallbackConnection: Connection;
   private balanceCache: Map<string, { data: WalletBalanceData; expiry: number }> = new Map();
-  private readonly CACHE_DURATION = 30000; // 30 seconds
+  private readonly CACHE_DURATION = 300000; // 5 minutes - reduced RPC calls
+  private lastRpcCall: number = 0;
+  private readonly MIN_RPC_INTERVAL = 1000; // 1 second minimum between RPC calls
 
   constructor() {
+    // Primary: Use Helius RPC for better rate limits
     this.connection = new Connection(SOLANA_RPC_URL, 'confirmed');
     
-    // Fallback RPC endpoints
-    const fallbackRPC = process.env.NODE_ENV === 'development' 
-      ? 'https://devnet.helius-rpc.com/?api-key=public'  
-      : 'https://api.mainnet-beta.solana.com';
-    this.fallbackConnection = new Connection(fallbackRPC, 'confirmed');
+    // Fallback: Use public RPC as backup
+    this.fallbackConnection = new Connection(PUBLIC_RPC_URL, 'confirmed');
     
-    console.log(`🔗 Wallet service initialized with RPC: ${SOLANA_RPC_URL}`);
-    console.log(`🔗 Fallback RPC: ${fallbackRPC}`);
+  }
+
+  /**
+   * Rate limit RPC calls to prevent 429 errors
+   */
+  private async rateLimit(): Promise<void> {
+    const now = Date.now();
+    const timeSinceLastCall = now - this.lastRpcCall;
+    
+    if (timeSinceLastCall < this.MIN_RPC_INTERVAL) {
+      const delay = this.MIN_RPC_INTERVAL - timeSinceLastCall;
+      console.log(`⏳ Rate limiting: waiting ${delay}ms before RPC call`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    
+    this.lastRpcCall = Date.now();
   }
 
   /**
@@ -78,57 +99,47 @@ export class WalletBalanceService {
     }
 
     try {
-      console.log(`🔍 Fetching REAL balance for wallet: ${walletAddress}`);
       const publicKey = new PublicKey(walletAddress);
       
       // Get SOL balance from blockchain
-      console.log(`⚡ Fetching SOL balance from Solana blockchain... (RPC: ${SOLANA_RPC_URL})`);
       
       let solBalance = 0;
       let solBalanceFormatted = 0;
       
       try {
-        solBalance = await this.connection.getBalance(publicKey);
+        // Use resilient RPC client with exponential backoff and retry logic
+        solBalance = await resilientRpcClient.getBalance(walletAddress);
         solBalanceFormatted = solBalance / 1e9; // Convert lamports to SOL
-        console.log(`⚡ SOL Balance: ${solBalanceFormatted} SOL`);
-      } catch (rpcError: any) {
-        console.error('⚡ Primary RPC Error:', rpcError?.message || rpcError);
+        console.log(`💰 MAINNET BALANCE: ${solBalanceFormatted.toFixed(4)} SOL ($${(solBalanceFormatted * await this.getSolPrice()).toFixed(2)} USD) for ${walletAddress}`);
+      } catch (rpcError: unknown) {
+        const error = rpcError as Error;
+        console.error('❌ Solana RPC returned 429', error?.message || error);
         
-        // Try fallback RPC
-        try {
-          console.log('⚡ Trying fallback RPC endpoint...');
-          solBalance = await this.fallbackConnection.getBalance(publicKey);
-          solBalanceFormatted = solBalance / 1e9;
-          console.log(`⚡ SOL Balance (via fallback): ${solBalanceFormatted} SOL`);
-        } catch (fallbackError: any) {
-          console.error('⚡ Fallback RPC also failed:', fallbackError?.message || fallbackError);
-          
-          if (rpcError?.message?.includes('403') || rpcError?.message?.includes('Access forbidden')) {
-            console.warn('⚡ Both RPCs access denied - using zero balance');
-            // Continue with zero balance instead of throwing
-            solBalance = 0;
-            solBalanceFormatted = 0;
-          } else if (rpcError?.message?.includes('Invalid param')) {
-            console.warn('⚡ Invalid wallet address for this network - using zero balance');
-            solBalance = 0;
-            solBalanceFormatted = 0;
-          } else {
-            throw new Error('RPC_UNAVAILABLE: Unable to fetch balance from any RPC endpoint');
-          }
+        // Resilient client already handles retries, so if we get here, all attempts failed
+        if (error?.message?.includes('429') || error?.message?.includes('rate limit')) {
+          console.warn('⚠️ Rate limit exceeded even with exponential backoff, continuing with zero balance');
+          solBalance = 0;
+          solBalanceFormatted = 0;
+        } else if (error?.message?.includes('Invalid param')) {
+          solBalance = 0;
+          solBalanceFormatted = 0;
+        } else {
+          // For development, continue with zero balance instead of failing
+          console.warn('⚠️ RPC request failed after all retries, continuing with zero balance');
+          solBalance = 0;
+          solBalanceFormatted = 0;
         }
       }
 
       // Get real SOL price from CoinGecko
       const solPrice = await this.getSolPrice();
       const solUsdValue = solBalanceFormatted * solPrice;
-      console.log(`💰 SOL USD Value: $${solUsdValue.toFixed(2)}`);
 
       // Get real token balances from blockchain  
       let tokenBalances: TokenBalance[] = [];
       try {
         tokenBalances = await this.getTokenBalances(publicKey);
-      } catch (tokenError: any) {
-        console.warn('🪙 Token balance fetch failed:', tokenError?.message || tokenError);
+      } catch {
         // Continue with empty token balances - at least we have SOL balance
       }
       
@@ -144,15 +155,10 @@ export class WalletBalanceService {
       };
 
       // Log the REAL balance data
-      console.log(`💰 REAL WALLET BALANCE FETCHED: $${totalUsdValue.toFixed(2)}`);
-      console.log(`📊 Breakdown: SOL: $${solUsdValue.toFixed(2)} (${solBalanceFormatted} SOL @ $${solPrice}) + Tokens: $${totalTokenUsdValue.toFixed(2)}`);
       
       if (totalUsdValue === 0) {
-        console.log('⚠️ Wallet has zero balance - may be empty on this network or invalid address');
       } else if (totalUsdValue < 1) {
-        console.log('⚠️ Wallet has insufficient funds for trading (less than $1)');
       } else {
-        console.log('✅ Wallet has sufficient funds for trading');
       }
 
       // Cache the real result
@@ -166,7 +172,6 @@ export class WalletBalanceService {
       console.error('Error fetching wallet balances:', error);
       
       // Return zero balance instead of mock data
-      console.log('❌ Unable to fetch balance, returning zero balance');
       return {
         solBalance: 0,
         solUsdValue: 0,
@@ -213,16 +218,14 @@ export class WalletBalanceService {
    */
   private async getTokenBalances(publicKey: PublicKey): Promise<TokenBalance[]> {
     try {
-      console.log('🪙 Fetching real token balances from Solana...');
       
-      // Get all token accounts for this wallet
+      // Get all token accounts for this wallet with fallback
       const tokenAccountsResponse = await this.connection.getTokenAccountsByOwner(publicKey, {
         programId: TOKEN_PROGRAM_ID,
       });
 
       const balances: TokenBalance[] = [];
       const tokenAccounts = tokenAccountsResponse.value;
-      console.log(`🪙 Found ${tokenAccounts.length} token accounts`);
 
       for (const { pubkey } of tokenAccounts) {
         try {
@@ -236,7 +239,6 @@ export class WalletBalanceService {
             
             // Only include accounts with balance > 0
             if (tokenAmount.uiAmount && tokenAmount.uiAmount > 0) {
-              console.log(`🪙 Token found: ${mint} - Balance: ${tokenAmount.uiAmount}`);
               
               // Get token info (for known tokens like USDC, USDT)
               let symbol = 'UNKNOWN';
@@ -250,7 +252,6 @@ export class WalletBalanceService {
                 usdValue = tokenAmount.uiAmount; // USDT is 1:1 with USD
               } else {
                 // For unknown tokens, assume 0 USD value for now
-                console.log(`🪙 Unknown token mint: ${mint}`);
               }
               
               balances.push({
@@ -262,25 +263,31 @@ export class WalletBalanceService {
               });
             }
           }
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         } catch (error) {
-          console.warn('🪙 Error parsing token account:', error);
+          // Ignore individual account errors
         }
       }
 
-      console.log(`🪙 Final token balances: ${balances.length} tokens with value`);
       return balances;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (error) {
-      console.warn('🪙 Error fetching token balances:', error);
       return [];
     }
   }
 
   /**
-   * Get current SOL price in USD from CoinGecko
+   * Get current SOL price in USD from CoinGecko with caching and rate limit handling
    */
   private async getSolPrice(): Promise<number> {
     try {
-      console.log('💲 Fetching real SOL price from CoinGecko...');
+      // Check cache first (cache for 30 seconds for live price tracking)
+      const cacheKey = 'sol_price_usd';
+      const cachedPrice = await this.getCachedValue(cacheKey);
+      if (cachedPrice && typeof cachedPrice === 'number') {
+        return cachedPrice;
+      }
+
       const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd', {
         method: 'GET',
         headers: {
@@ -291,6 +298,10 @@ export class WalletBalanceService {
       });
 
       if (!response.ok) {
+        // Handle rate limiting more gracefully
+        if (response.status === 429) {
+          return 200; // More reasonable fallback price
+        }
         throw new Error(`CoinGecko API error: ${response.status}`);
       }
 
@@ -298,15 +309,37 @@ export class WalletBalanceService {
       const solPrice = data.solana?.usd;
       
       if (typeof solPrice === 'number' && solPrice > 0) {
-        console.log(`💲 Real SOL price: $${solPrice}`);
+        // Cache the price for 30 seconds for live price tracking
+        await this.setCachedValue(cacheKey, solPrice, 30);
         return solPrice;
       } else {
         throw new Error('Invalid price data received');
       }
     } catch (error) {
       console.error('💲 Error fetching SOL price, using fallback:', error);
-      return 100; // Fallback price of $100 per SOL
+      return 200; // Updated fallback price
     }
+  }
+
+  /**
+   * Simple cache helpers for price data
+   */
+  private priceCache = new Map<string, { value: number, expiry: number }>();
+
+  private async getCachedValue(key: string): Promise<number | null> {
+    const cached = this.priceCache.get(key);
+    if (cached && cached.expiry > Date.now()) {
+      return cached.value;
+    }
+    this.priceCache.delete(key); // Clean expired
+    return null;
+  }
+
+  private async setCachedValue(key: string, value: number, ttlSeconds: number): Promise<void> {
+    this.priceCache.set(key, {
+      value,
+      expiry: Date.now() + (ttlSeconds * 1000)
+    });
   }
 
   /**

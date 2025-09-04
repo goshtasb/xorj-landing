@@ -62,7 +62,7 @@ class QuantitativeEngineClient:
         if not self.base_url:
             raise ValueError("Quantitative Engine base URL is required")
         
-        if self.config.is_production() and not self.api_key:
+        if self.config.is_production and not self.api_key:
             raise ValueError("API key is required for production environment")
     
     async def get_ranked_traders(
@@ -172,18 +172,20 @@ class QuantitativeEngineClient:
             if not isinstance(response_data, dict):
                 raise ValueError("Invalid response format: expected dictionary")
             
-            if "ranked_traders" not in response_data:
-                raise ValueError("Invalid response format: missing 'ranked_traders' field")
+            if "data" not in response_data:
+                raise ValueError("Invalid response format: missing 'data' field")
             
-            ranked_traders_data = response_data["ranked_traders"]
+            ranked_traders_data = response_data["data"]
             if not isinstance(ranked_traders_data, list):
-                raise ValueError("Invalid response format: 'ranked_traders' must be a list")
+                raise ValueError("Invalid response format: 'data' must be a list")
             
             # Parse and validate trader data
             ranked_traders = []
             for trader_data in ranked_traders_data:
                 try:
-                    ranked_trader = RankedTrader.from_dict(trader_data)
+                    # Transform quantitative engine format to expected format
+                    transformed_data = self._transform_trader_data(trader_data)
+                    ranked_trader = RankedTrader.from_dict(transformed_data)
                     ranked_traders.append(ranked_trader)
                 except Exception as e:
                     logger.warning(
@@ -273,3 +275,59 @@ class QuantitativeEngineClient:
                 error=str(e)
             )
             return False
+    
+    def _transform_trader_data(self, trader_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Transform quantitative engine trader data format to expected format.
+        
+        Args:
+            trader_data: Raw trader data from quantitative engine
+            
+        Returns:
+            Dict: Transformed data compatible with RankedTrader model
+        """
+        try:
+            # Extract basic fields
+            transformed = {
+                "wallet_address": trader_data.get("wallet_address"),
+                "rank": trader_data.get("rank"),
+                "recent_performance": trader_data.get("metrics", {})
+            }
+            
+            # Transform trust_score from float to expected dict format
+            trust_score_value = trader_data.get("trust_score", 0)
+            metrics = trader_data.get("metrics", {})
+            
+            # Create trust_score dict with derived values
+            transformed["trust_score"] = {
+                "score": trust_score_value,
+                "confidence_level": min(90, max(60, trust_score_value * 1.1)),  # Derive from score
+                "risk_assessment": self._derive_risk_assessment(trust_score_value, metrics),
+                "consistency_rating": min(95, max(50, trust_score_value * 0.9)),  # Derive from score
+                "win_rate": min(85, max(45, metrics.get("win_loss_ratio", 1.5) * 15)),  # Derive from win/loss ratio
+                "sharpe_ratio": metrics.get("sharpe_ratio"),
+                "max_drawdown": metrics.get("maximum_drawdown_percent")
+            }
+            
+            return transformed
+            
+        except Exception as e:
+            logger.error(
+                "Failed to transform trader data",
+                trader_data=trader_data,
+                error=str(e)
+            )
+            raise
+    
+    def _derive_risk_assessment(self, trust_score: float, metrics: Dict[str, Any]) -> str:
+        """Derive risk assessment based on trust score and metrics."""
+        max_drawdown = metrics.get("maximum_drawdown_percent", 10.0)
+        sharpe_ratio = metrics.get("sharpe_ratio", 1.0)
+        
+        # Conservative thresholds
+        if trust_score >= 85 and max_drawdown <= 5.0 and sharpe_ratio >= 2.0:
+            return "low"
+        elif trust_score >= 70 and max_drawdown <= 10.0 and sharpe_ratio >= 1.5:
+            return "medium"
+        else:
+            return "high"

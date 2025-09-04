@@ -92,7 +92,7 @@ export const TradesQuerySchema = z.object({
 export interface ValidationError {
   success: false;
   error: {
-    code: 'VALIDATION_ERROR' | 'AUTHENTICATION_ERROR' | 'AUTHORIZATION_ERROR' | 'RATE_LIMIT_ERROR' | 'INTERNAL_ERROR';
+    code: 'VALIDATION_ERROR' | 'AUTHENTICATION_ERROR' | 'AUTHORIZATION_ERROR' | 'RATE_LIMIT_ERROR' | 'INTERNAL_ERROR' | 'INVALID_SIGNATURE' | 'UNAUTHORIZED';
     message: string;
     details?: string | string[] | Record<string, string[]>;
   };

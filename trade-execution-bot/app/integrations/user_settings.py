@@ -110,9 +110,10 @@ class UserSettingsClient:
             
             self.pool = await asyncpg.create_pool(
                 self.database_url,
-                min_size=2,
-                max_size=10,
+                min_size=5,
+                max_size=50,  # Increased for high-traffic API requests
                 command_timeout=30.0,
+                max_inactive_connection_lifetime=300.0,  # 5 minutes
                 server_settings={
                     'application_name': self.config.service_name,
                     'timezone': 'UTC'

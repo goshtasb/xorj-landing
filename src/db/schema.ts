@@ -27,6 +27,17 @@
 export { users, insertUserSchema, selectUserSchema, updateUserSchema } from './schema/users';
 export { userSettings, insertUserSettingsSchema, selectUserSettingsSchema, updateUserSettingsSchema } from './schema/userSettings';
 
+// Import for ValidationSchemas
+import { insertUserSchema, selectUserSchema, updateUserSchema } from './schema/users';
+import { insertUserSettingsSchema, selectUserSettingsSchema, updateUserSettingsSchema, RISK_PROFILES } from './schema/userSettings';
+import { insertScoringRunSchema, selectScoringRunSchema, updateScoringRunSchema, SCORING_RUN_STATUSES } from './schema/scoringRuns';
+import { insertTraderScoreSchema, selectTraderScoreSchema, updateTraderScoreSchema } from './schema/traderScores';
+import { insertBotStateSchema, selectBotStateSchema, updateBotStateSchema } from './schema/botStates';
+import { insertExecutionJobSchema, selectExecutionJobSchema, updateExecutionJobSchema, EXECUTION_JOB_STATUSES } from './schema/executionJobs';
+import { insertTradeSchema, selectTradeSchema, updateTradeSchema, TRADE_STATUSES, TRADE_SIDES } from './schema/trades';
+import { insertSwapHistorySchema, selectSwapHistorySchema, updateSwapHistorySchema } from './schema/swapHistory';
+import { insertWaitlistSignupSchema, selectWaitlistSignupSchema, updateWaitlistSignupSchema, WAITLIST_STATUSES, SIGNUP_SOURCES } from './schema/waitlistSignups';
+
 // Trading Intelligence Tables
 export { scoringRuns, insertScoringRunSchema, selectScoringRunSchema, updateScoringRunSchema } from './schema/scoringRuns';
 export { traderScores, insertTraderScoreSchema, selectTraderScoreSchema, updateTraderScoreSchema } from './schema/traderScores';
@@ -35,6 +46,9 @@ export { traderScores, insertTraderScoreSchema, selectTraderScoreSchema, updateT
 export { executionJobs, insertExecutionJobSchema, selectExecutionJobSchema, updateExecutionJobSchema } from './schema/executionJobs';
 export { trades, insertTradeSchema, selectTradeSchema, updateTradeSchema } from './schema/trades';
 export { botStates, insertBotStateSchema, selectBotStateSchema, updateBotStateSchema } from './schema/botStates';
+
+// Data Pipeline Tables
+export { swapHistory } from './schema/swapHistory';
 
 // Marketing and Growth Tables
 export { waitlistSignups, insertWaitlistSignupSchema, selectWaitlistSignupSchema, updateWaitlistSignupSchema } from './schema/waitlistSignups';
@@ -135,6 +149,12 @@ export type {
   PortfolioPosition,
   TradingPerformance
 } from './schema/trades';
+
+// Data Pipeline Types
+export type {
+  SwapHistory,
+  NewSwapHistory
+} from './schema/swapHistory';
 
 // Marketing and Growth Types
 export type {
@@ -279,6 +299,17 @@ export const ValidationSchemas = {
  * }).returning();
  * ```
  */
+// Import table definitions for Tables object
+import { users } from './schema/users';
+import { userSettings } from './schema/userSettings';
+import { scoringRuns } from './schema/scoringRuns';
+import { traderScores } from './schema/traderScores';
+import { executionJobs } from './schema/executionJobs';
+import { trades } from './schema/trades';
+import { botStates } from './schema/botStates';
+import { swapHistory } from './schema/swapHistory';
+import { waitlistSignups } from './schema/waitlistSignups';
+
 export const Tables = {
   users,
   userSettings,
@@ -287,6 +318,7 @@ export const Tables = {
   executionJobs,
   trades,
   botStates,
+  swapHistory,
   waitlistSignups
 } as const;
 
@@ -366,19 +398,19 @@ export const CompatibilityLayer = {
   // Type converters for API responses
   convertToApi: {
     user: (user: User) => user,
-    userSettings: convertUserSettingsToApi,
-    scoringRun: convertScoringRunToApi,
-    traderScore: convertTraderScoreToApi,
-    executionJob: convertExecutionJobToApi,
-    trade: convertTradeToApi,
-    waitlistSignup: convertWaitlistSignupToApi
+    userSettings: (userSettings: UserSettings) => userSettings,
+    scoringRun: (scoringRun: ScoringRun) => scoringRun,
+    traderScore: (traderScore: TraderScore) => traderScore,
+    executionJob: (executionJob: ExecutionJob) => executionJob,
+    trade: (trade: Trade) => trade,
+    waitlistSignup: (waitlistSignup: WaitlistSignup) => waitlistSignup
   },
   
   // Type converters for API requests
   convertFromApi: {
-    userSettings: convertUserSettingsFromApi,
-    executionJob: convertExecutionJobFromBot,
-    trade: convertTradeFromSystem,
-    waitlistSignup: convertWaitlistSignupFromForm
+    userSettings: (userSettings: UserSettings) => userSettings,
+    executionJob: (executionJob: ExecutionJob) => executionJob,
+    trade: (trade: Trade) => trade,
+    waitlistSignup: (waitlistSignup: WaitlistSignup) => waitlistSignup
   }
 } as const;

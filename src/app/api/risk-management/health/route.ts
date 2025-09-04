@@ -3,10 +3,10 @@
  * Monitor the final safety layer protecting capital
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { riskManagementService } from '@/lib/riskManagement';
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   const startTime = Date.now();
   
   try {

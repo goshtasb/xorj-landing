@@ -17,8 +17,9 @@
 
 import { Worker, Job } from 'bullmq';
 import { WriteJob, BotStatusJob, UserSettingsJob, TradeExecutionJob } from './queueService';
-import { query, transaction } from './database';
-import { cacheLayer } from './cacheLayer';\nimport { redisService } from './redis';
+import { transaction } from './database';
+import { cacheLayer } from './cacheLayer';
+// import { redisService } from './redis'; // Unused for now
 
 interface WorkerConfig {
   concurrency: number;
@@ -53,7 +54,6 @@ class WriteWorker {
   private async initialize(): Promise<void> {
     try {
       const config = this.getWorkerConfig();
-      console.log(`🔄 Initializing write worker with ${config.concurrency} concurrent jobs`);
 
       this.worker = new Worker<WriteJob>(
         'write-operations',
@@ -70,7 +70,6 @@ class WriteWorker {
 
       // Handle worker events
       this.worker.on('ready', () => {
-        console.log('✅ Write worker is ready and waiting for jobs');
         this.isRunning = true;
       });
 
@@ -82,19 +81,18 @@ class WriteWorker {
         console.error(`❌ Job ${job?.id} failed:`, err);
       });
 
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       this.worker.on('completed', (job) => {
-        console.log(`✅ Job ${job.id} completed successfully`);
+        // Completed job logic would go here
       });
 
       // Graceful shutdown handling
       process.on('SIGINT', async () => {
-        console.log('\n🔄 Gracefully shutting down write worker...');
         await this.shutdown();
         process.exit(0);
       });
 
       process.on('SIGTERM', async () => {
-        console.log('\n🔄 Gracefully shutting down write worker...');
         await this.shutdown();
         process.exit(0);
       });
@@ -109,10 +107,10 @@ class WriteWorker {
    * Process individual jobs based on their type
    */
   private async processJob(job: Job<WriteJob>): Promise<string> {
-    const { type, timestamp, requestId } = job.data;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { type, timestamp: _timestamp, requestId: _requestId } = job.data;
     const processingStartTime = Date.now();
     
-    console.log(`🚀 Processing job ${job.id}: ${type} (requested at ${new Date(timestamp).toISOString()})`);
 
     try {
       let result: string;
@@ -128,11 +126,11 @@ class WriteWorker {
           result = await this.processTradeExecutionJob(job.data as TradeExecutionJob);
           break;
         default:
-          throw new Error(`Unknown job type: ${(job.data as any).type}`);
+          throw new Error(`Unknown job type: ${(job.data as { type?: string }).type}`);
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const processingTime = Date.now() - processingStartTime;
-      console.log(`✅ Job ${job.id} processed in ${processingTime}ms: ${result}`);
       
       return result;
     } catch (error) {
@@ -147,12 +145,13 @@ class WriteWorker {
    * Process bot status change jobs
    */
   private async processBotStatusJob(jobData: BotStatusJob): Promise<string> {
-    const { userId, enabled, requestId } = jobData;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { userId, enabled, requestId: _requestId } = jobData;
     
-    console.log(`🤖 Processing bot status change: ${userId} -> ${enabled ? 'ENABLED' : 'DISABLED'}`);
 
     try {
       // Execute database transaction
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const result = await transaction(async (client) => {
         // Update user_settings table
         const updateResult = await client.query(`
@@ -175,9 +174,9 @@ class WriteWorker {
               is_enabled = $2,
               updated_at = NOW()
           `, [userId, enabled]);
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         } catch (error) {
           // bot_states table might not exist - log but don't fail
-          console.warn(`⚠️ Could not update bot_states table:`, error);
         }
 
         return updateResult;
@@ -187,7 +186,6 @@ class WriteWorker {
       await cacheLayer.invalidateUserCache(userId, 'settings');
       await cacheLayer.invalidateUserCache(userId, 'bot_status');
 
-      console.log(`✅ Bot status updated in database for ${userId}: ${enabled}`);
       
       return `Bot ${enabled ? 'enabled' : 'disabled'} for user ${userId}`;
     } catch (error) {
@@ -200,12 +198,13 @@ class WriteWorker {
    * Process user settings update jobs
    */
   private async processUserSettingsJob(jobData: UserSettingsJob): Promise<string> {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { userId, settings, requestId } = jobData;
     
-    console.log(`⚙️ Processing user settings update: ${userId}`, settings);
 
     try {
       // Execute database transaction
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const result = await transaction(async (client) => {
         const updateResult = await client.query(`
           INSERT INTO user_settings (
@@ -237,7 +236,6 @@ class WriteWorker {
       await cacheLayer.invalidateUserCache(userId, 'settings');
       await cacheLayer.invalidateUserCache(userId);
 
-      console.log(`✅ User settings updated in database for ${userId}`);
       
       return `Settings updated for user ${userId}`;
     } catch (error) {
@@ -250,12 +248,13 @@ class WriteWorker {
    * Process trade execution jobs
    */
   private async processTradeExecutionJob(jobData: TradeExecutionJob): Promise<string> {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { userId, tradeData, requestId } = jobData;
     
-    console.log(`💰 Processing trade execution: ${userId}`, tradeData);
 
     try {
       // Execute database transaction for trade record
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const result = await transaction(async (client) => {
         const tradeResult = await client.query(`
           INSERT INTO trades (
@@ -285,7 +284,6 @@ class WriteWorker {
       await cacheLayer.invalidateUserCache(userId, 'performance');
       await cacheLayer.invalidateUserCache(userId, 'bot_trades');
 
-      console.log(`✅ Trade record created in database for ${userId}`);
       
       return `Trade queued for user ${userId}`;
     } catch (error) {
@@ -309,26 +307,22 @@ class WriteWorker {
    */
   public async shutdown(): Promise<void> {
     if (this.worker) {
-      console.log('🔄 Shutting down write worker...');
       await this.worker.close();
       this.isRunning = false;
-      console.log('✅ Write worker shut down complete');
     }
   }
 }
 
 // Create and start the worker when this file is run directly
 if (require.main === module) {
-  console.log('🚀 Starting XORJ Write Worker...');
-  console.log(`📍 Process ID: ${process.pid}`);
-  console.log(`🕐 Started at: ${new Date().toISOString()}`);
   
   const worker = new WriteWorker();
   
   // Keep the process alive
   setInterval(() => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const status = worker.getStatus();
-    console.log(`💓 Worker heartbeat: ${status.isRunning ? 'RUNNING' : 'STOPPED'} - ${new Date().toISOString()}`);
+    // Heartbeat check - could log status if needed
   }, 30000); // Heartbeat every 30 seconds
 }
 

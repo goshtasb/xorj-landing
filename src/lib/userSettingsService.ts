@@ -4,49 +4,30 @@
  * Replaces in-memory ServerUserSettingsStorage with persistent database storage
  * using Drizzle ORM for type-safe operations.
  * 
+ * REFACTORED: Uses shared database utilities to eliminate potential circular dependencies
+ * and follow industry-standard modular architecture patterns.
+ * 
  * Features:
  * - Persistent database storage
  * - Type-safe operations with Drizzle ORM
  * - Automatic user creation on first settings save
  * - Transaction support for data consistency
  * - Error handling and logging
+ * - Shared database connection pool
  */
 
+import { 
+  getSharedDatabase, 
+  getUserSettingsTable, 
+  normalizeRiskProfile,
+  handleDatabaseError,
+  type RiskProfile 
+} from './shared/database-utils';
 import { eq } from 'drizzle-orm';
-
-// Temporary minimal table definitions to avoid schema compilation issues
-import { pgTable, uuid, text, timestamp, decimal, jsonb } from 'drizzle-orm/pg-core';
-import { sql } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
-
-// Table definitions matching existing database schema
-const userSettings = pgTable('user_settings', {
-  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`).notNull(),
-  walletAddress: text('wallet_address').notNull().unique(),
-  riskProfile: text('risk_profile', { enum: ['Conservative', 'Balanced', 'Aggressive'] }).notNull().default('Balanced'),
-  settings: jsonb('settings').notNull().default('{}'),
-  createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).default(sql`now()`),
-  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).default(sql`now()`)
-});
-
-// Database connection - simplified
-const connectionConfig = {
-  host: process.env.DATABASE_HOST || 'localhost',
-  port: parseInt(process.env.DATABASE_PORT || '5432', 10),
-  user: process.env.DATABASE_USER || 'postgres',
-  password: process.env.DATABASE_PASSWORD || '',
-  database: process.env.DATABASE_NAME || 'xorj_bot_state',
-  max: 10,
-  idleTimeoutMillis: 30000
-};
-
-const pool = new Pool(connectionConfig);
-const db = drizzle(pool);
 
 export interface UserSettingsApiFormat {
   walletAddress: string;
-  riskProfile: 'Conservative' | 'Balanced' | 'Aggressive';
+  riskProfile: RiskProfile;
   investmentAmount?: number;
   lastUpdated: Date;
 }
@@ -60,6 +41,9 @@ export class UserSettingsService {
   static async getUserSettings(walletAddress: string): Promise<UserSettingsApiFormat | null> {
     try {
       console.log(`🔍 UserSettingsService: Fetching settings for ${walletAddress}`);
+      
+      const { db } = await getSharedDatabase();
+      const userSettings = await getUserSettingsTable();
       
       // Get user settings directly from user_settings table
       const settings = await db
@@ -76,8 +60,8 @@ export class UserSettingsService {
       const setting = settings[0];
       const result: UserSettingsApiFormat = {
         walletAddress,
-        riskProfile: setting.riskProfile as 'Conservative' | 'Balanced' | 'Aggressive',
-        investmentAmount: setting.settings?.investmentAmount || undefined,
+        riskProfile: normalizeRiskProfile(setting.riskProfile),
+        investmentAmount: (setting.settings as Record<string, unknown>)?.investmentAmount as number | undefined,
         lastUpdated: setting.updatedAt || new Date()
       };
       
@@ -85,7 +69,12 @@ export class UserSettingsService {
       return result;
       
     } catch (error) {
-      console.error(`❌ Error fetching settings for ${walletAddress}:`, error);
+      // In development mode, suppress connection pool errors to reduce noise
+      if (process.env.NODE_ENV === 'development' && (error as Error)?.message?.includes('too many clients')) {
+        console.warn(`⚠️ Database connection pool exhausted for ${walletAddress} (development mode)`);
+      } else {
+        console.error(`❌ Error fetching settings for ${walletAddress}:`, error);
+      }
       throw error;
     }
   }
@@ -95,28 +84,32 @@ export class UserSettingsService {
    */
   static async saveUserSettings(
     walletAddress: string, 
-    riskProfile: 'Conservative' | 'Balanced' | 'Aggressive',
+    riskProfile: RiskProfile,
     investmentAmount?: number
   ): Promise<UserSettingsApiFormat> {
     try {
       console.log(`💾 UserSettingsService: Saving settings for ${walletAddress}: ${riskProfile}`);
       
+      const { db } = await getSharedDatabase();
+      const userSettings = await getUserSettingsTable();
+      
       return await db.transaction(async (tx) => {
         const now = new Date();
         
-        // Prepare settings data
-        const settingsJson = {
-          investmentAmount: investmentAmount || 1000
-        };
+        // Prepare settings data - store investment amount if provided (including 0)
+        const settingsJson = investmentAmount !== undefined && investmentAmount !== null
+          ? { investmentAmount: investmentAmount }
+          : {};
         
         const settingsData = {
           walletAddress,
-          riskProfile,
+          riskProfile: normalizeRiskProfile(riskProfile),
           settings: settingsJson,
           updatedAt: now
         };
         
         // Upsert user settings (insert or update if exists)
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const savedSettings = await tx
           .insert(userSettings)
           .values({
@@ -135,18 +128,17 @@ export class UserSettingsService {
         
         const result: UserSettingsApiFormat = {
           walletAddress,
-          riskProfile,
+          riskProfile: normalizeRiskProfile(riskProfile),
           investmentAmount: investmentAmount,
           lastUpdated: now
         };
         
-        console.log(`✅ Settings saved for ${walletAddress}: riskProfile=${riskProfile}`);
+        console.log(`✅ Settings saved for ${walletAddress}: riskProfile=${result.riskProfile}`);
         return result;
       });
       
     } catch (error) {
-      console.error(`❌ Error saving settings for ${walletAddress}:`, error);
-      throw error;
+      return handleDatabaseError(error, `save settings for ${walletAddress}`);
     }
   }
   
@@ -168,14 +160,16 @@ export class UserSettingsService {
    */
   static async getAllUsersWithSettings(): Promise<string[]> {
     try {
+      const { db } = await getSharedDatabase();
+      const userSettings = await getUserSettingsTable();
+      
       const usersWithSettings = await db
         .select({ walletAddress: userSettings.walletAddress })
         .from(userSettings);
       
       return usersWithSettings.map(user => user.walletAddress);
     } catch (error) {
-      console.error('❌ Error fetching all users with settings:', error);
-      throw error;
+      return handleDatabaseError(error, 'fetch all users with settings');
     }
   }
   
@@ -189,7 +183,7 @@ export class ServerUserSettingsStorage {
   static async getUserSettings(walletAddress: string): Promise<{ riskProfile: string; lastUpdated: string }> {
     const settings = await UserSettingsService.getUserSettings(walletAddress);
     if (!settings) {
-      return { riskProfile: 'Balanced', lastUpdated: new Date().toISOString() };
+      return { riskProfile: 'moderate', lastUpdated: new Date().toISOString() };
     }
     return {
       riskProfile: settings.riskProfile,
@@ -198,8 +192,8 @@ export class ServerUserSettingsStorage {
   }
   
   static async setUserSettings(walletAddress: string, riskProfile: string): Promise<void> {
-    const apiRiskProfile = riskProfile as 'Conservative' | 'Balanced' | 'Aggressive';
-    await UserSettingsService.saveUserSettings(walletAddress, apiRiskProfile);
+    const normalizedProfile = normalizeRiskProfile(riskProfile);
+    await UserSettingsService.saveUserSettings(walletAddress, normalizedProfile);
   }
   
   static async getAllSettings(): Promise<Record<string, { riskProfile: string; lastUpdated: string }>> {

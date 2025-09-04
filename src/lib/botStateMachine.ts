@@ -6,7 +6,7 @@
  * guaranteed recovery paths for all possible states.
  */
 
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection } from '@solana/web3.js';
 import { TradeService, BotStateService, ExecutionJobService } from './botStateService';
 import { ValidatedTradeSignal } from './riskManagement';
 import { ServiceResponse } from '../types/database';
@@ -108,7 +108,7 @@ export interface BotStateContext {
     state: BotState;
     event?: BotEvent;
     timestamp: Date;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
   }>;
 }
 
@@ -131,7 +131,6 @@ export class BotStateMachine {
    */
   async initializeBotState(userId: string, vaultAddress: string): Promise<ServiceResponse<BotStateContext>> {
     try {
-      console.log(`🔧 Initializing bot state machine for user ${userId}`);
 
       // Get existing bot state from database
       const existingState = await BotStateService.getOrCreate(userId);
@@ -149,7 +148,6 @@ export class BotStateMachine {
 
       // Determine initial state based on pending operations
       if (pendingTrades.length > 0) {
-        console.log(`🔄 Found ${pendingTrades.length} pending trades requiring recovery`);
         
         // Recover the first pending trade
         const pendingTrade = pendingTrades[0];
@@ -158,10 +156,8 @@ export class BotStateMachine {
 
         if (pendingTrade.status === 'SUBMITTED' || pendingTrade.status === 'PENDING') {
           currentState = BotState.AWAITING_CONFIRMATION;
-          console.log(`🕐 Recovered to AWAITING_CONFIRMATION for trade ${currentTradeId}`);
         } else {
           currentState = BotState.FAILED_RETRY_PENDING;
-          console.log(`🔄 Recovered to FAILED_RETRY_PENDING for trade ${currentTradeId}`);
         }
       }
 
@@ -185,7 +181,6 @@ export class BotStateMachine {
       // Persist initial state
       await this.persistState(stateContext);
 
-      console.log(`✅ Bot state machine initialized: ${currentState}`);
       
       return {
         success: true,
@@ -209,10 +204,9 @@ export class BotStateMachine {
   async processEvent(
     context: BotStateContext, 
     event: BotEvent, 
-    metadata?: Record<string, any>
+    metadata?: Record<string, unknown>
   ): Promise<ServiceResponse<BotStateContext>> {
     try {
-      console.log(`🔄 Processing event ${event} from state ${context.currentState}`);
 
       // Validate transition is allowed
       const allowedTransitions = STATE_TRANSITIONS[context.currentState];
@@ -248,7 +242,6 @@ export class BotStateMachine {
       // Persist updated state
       await this.persistState(updatedContext);
 
-      console.log(`✅ State transition successful: ${context.currentState} → ${newState}`);
 
       return {
         success: true,
@@ -274,7 +267,6 @@ export class BotStateMachine {
     validatedSignal: ValidatedTradeSignal
   ): Promise<ServiceResponse<BotStateContext>> {
     try {
-      console.log(`🚀 Executing trade with state machine coordination`);
 
       // Generate deterministic client_order_id for idempotency
       const clientOrderId = TradeService.generateClientOrderId(
@@ -292,7 +284,6 @@ export class BotStateMachine {
       );
 
       if (existingTrade.success && existingTrade.data) {
-        console.log(`🔄 Trade already exists: ${clientOrderId} - enforcing idempotency`);
         
         return {
           success: true,
@@ -360,7 +351,7 @@ export class BotStateMachine {
    * Check pending trades for recovery
    * Requirement 1.3: Implement Graceful Recovery Logic
    */
-  private async checkPendingTrades(userId: string): Promise<any[]> {
+  private async checkPendingTrades(userId: string): Promise<unknown[]> {
     try {
       const pendingTrades = await TradeService.getSubmittedTrades();
       
@@ -394,24 +385,20 @@ export class BotStateMachine {
    */
   private async verifyTransactionStatus(signature: string, tradeId: string): Promise<void> {
     try {
-      console.log(`🔍 Verifying transaction status: ${signature}`);
       
       const status = await this.connection.getSignatureStatus(signature);
       
       if (status?.value?.confirmationStatus === 'confirmed' || status?.value?.confirmationStatus === 'finalized') {
         // Update trade to confirmed
         await TradeService.updateToConfirmed(tradeId, {});
-        console.log(`✅ Transaction confirmed: ${signature}`);
       } else if (status?.value?.err) {
         // Update trade to failed
         await TradeService.updateToFailed(tradeId, `Transaction failed: ${JSON.stringify(status.value.err)}`);
-        console.log(`❌ Transaction failed: ${signature}`);
       } else {
-        console.log(`⏳ Transaction still pending: ${signature}`);
       }
 
-    } catch (error) {
-      console.warn(`⚠️ Could not verify transaction status:`, error);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    } catch (_error) {
     }
   }
 
@@ -421,7 +408,7 @@ export class BotStateMachine {
   private async handleStateEntry(
     context: BotStateContext, 
     event: BotEvent, 
-    metadata?: Record<string, any>
+    metadata?: Record<string, unknown>
   ): Promise<void> {
     const { currentState } = context;
 
@@ -435,7 +422,6 @@ export class BotStateMachine {
         // Increment retry count and schedule retry
         context.retryCount += 1;
         if (context.retryCount >= this.MAX_RETRIES) {
-          console.log(`🚫 Max retries exceeded for trade ${context.currentTradeId}`);
           await this.processEvent(context, BotEvent.SYSTEM_ERROR, {
             reason: 'Maximum retry attempts exceeded'
           });
@@ -470,7 +456,6 @@ export class BotStateMachine {
   private scheduleConfirmationTimeout(context: BotStateContext): void {
     setTimeout(async () => {
       if (context.currentState === BotState.AWAITING_CONFIRMATION) {
-        console.log(`⏰ Confirmation timeout for trade ${context.currentTradeId}`);
         await this.processEvent(context, BotEvent.TRADE_FAILED, {
           reason: 'Confirmation timeout exceeded'
         });

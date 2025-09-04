@@ -29,9 +29,9 @@ from abc import abstractmethod
 from decimal import Decimal
 
 import structlog
-from solana.transaction import Transaction
-from solana.keypair import Keypair
-from solana.publickey import PublicKey
+from solders.transaction import Transaction
+from solders.keypair import Keypair
+from solders.pubkey import Pubkey
 from solders.hash import Hash as SolanaHash
 
 from app.core.config import get_config, TradeExecutionConfig
@@ -69,7 +69,7 @@ class HSMProvider(abc.ABC):
         self.config = config
         self.audit_logger = get_audit_logger()
         self._connected = False
-        self._public_key: Optional[PublicKey] = None
+        self._public_key: Optional[Pubkey] = None
     
     @abstractmethod
     async def connect(self) -> bool:
@@ -82,12 +82,12 @@ class HSMProvider(abc.ABC):
         pass
     
     @abstractmethod
-    async def get_public_key(self) -> PublicKey:
+    async def get_public_key(self) -> Pubkey:
         """
         Get the public key from the HSM without exposing private key.
         
         Returns:
-            PublicKey: Public key for the delegated authority
+            Pubkey: Public key for the delegated authority
         """
         pass
     
@@ -244,7 +244,7 @@ class AWSKMSProvider(HSMProvider):
             )
             raise HSMConnectionError(f"Failed to connect to AWS KMS: {str(e)}")
     
-    async def get_public_key(self) -> PublicKey:
+    async def get_public_key(self) -> Pubkey:
         """Get public key from AWS KMS."""
         if not self._connected or not self._kms_client:
             raise HSMConnectionError("Not connected to AWS KMS")
@@ -259,7 +259,7 @@ class AWSKMSProvider(HSMProvider):
                 lambda: self._kms_client.get_public_key(KeyId=self._key_id)
             )
             
-            # Extract public key material and convert to Solana PublicKey format
+            # Extract public key material and convert to Solana Pubkey format
             # Note: This is a placeholder - real implementation would need proper
             # key format conversion from KMS public key to Solana ed25519 format
             public_key_der = response['PublicKey']
@@ -267,7 +267,7 @@ class AWSKMSProvider(HSMProvider):
             # For demonstration - in production this would properly parse the DER format
             # and extract the ed25519 public key bytes
             public_key_bytes = public_key_der[-32:]  # Last 32 bytes for ed25519
-            self._public_key = PublicKey(public_key_bytes)
+            self._public_key = Pubkey(public_key_bytes)
             
             logger.info(
                 "Retrieved public key from AWS KMS",
@@ -481,7 +481,7 @@ class DevelopmentHSMProvider(HSMProvider):
         # In real development, this might load from encrypted file
         return Keypair()
     
-    async def get_public_key(self) -> PublicKey:
+    async def get_public_key(self) -> Pubkey:
         """Get public key from development keypair."""
         if not self._connected or not self._keypair:
             raise HSMConnectionError("Development HSM not connected")
@@ -677,7 +677,7 @@ class HSMManager:
         
         return provider_class(self.config)
     
-    async def get_public_key(self) -> PublicKey:
+    async def get_public_key(self) -> Pubkey:
         """Get public key for the delegated authority."""
         if not self._initialized or not self._provider:
             raise HSMConnectionError("HSM Manager not initialized")

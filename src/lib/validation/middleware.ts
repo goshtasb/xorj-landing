@@ -7,6 +7,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z, ZodError } from 'zod';
 import { ValidationError, SuccessResponse } from './schemas';
 import { rateLimiter, RATE_LIMITS, getClientIdentifier, createRateLimitResponse } from '../rateLimit';
+import { secureEnv } from '../security/envInit';
+// import { credentialValidator } from '../security/credentialValidator'; // Unused for now
 
 /**
  * Standardized error response creator
@@ -202,17 +204,45 @@ export function validateAuthToken(request: NextRequest):
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const jwt = require('jsonwebtoken');
-    const JWT_SECRET = process.env.JWT_SECRET;
+    
+    // Get validated environment configuration
+    const envConfig = secureEnv.getConfig();
+    
+    if (!envConfig.isValid) {
+      console.error('❌ Environment validation failed:', envConfig.errors);
+      return {
+        success: false,
+        response: createErrorResponse(
+          'AUTHENTICATION_ERROR',
+          'Server configuration error',
+          'Authentication service unavailable',
+          503
+        )
+      };
+    }
+    
+    const { secret: JWT_SECRET, algorithm } = envConfig.config.jwt;
     
     if (!JWT_SECRET) {
-      return NextResponse.json(
-        { error: 'Server configuration error - JWT_SECRET not set' },
-        { status: 500 }
-      );
+      console.error('❌ JWT_SECRET not available in validated environment');
+      return {
+        success: false,
+        response: createErrorResponse(
+          'AUTHENTICATION_ERROR',
+          'Server configuration error',
+          'Authentication service unavailable',
+          503
+        )
+      };
     }
     
     const token = authorization.replace('Bearer ', '');
-    const decoded = jwt.verify(token, JWT_SECRET) as { wallet_address?: string; user_id?: string };
+    
+    // Use validated JWT configuration with algorithm specification
+    const decoded = jwt.verify(token, JWT_SECRET, { 
+      algorithms: [algorithm] 
+    }) as { wallet_address?: string; user_id?: string };
+    
     const userWalletAddress = decoded.wallet_address || decoded.user_id;
 
     if (!userWalletAddress) {
@@ -233,17 +263,67 @@ export function validateAuthToken(request: NextRequest):
     };
 
   } catch (error) {
-    console.error('JWT validation error:', error);
+    // Sanitize error logging - don't expose sensitive token data
+    const sanitizedError = error instanceof Error ? error.message : 'Unknown JWT error';
+    console.error('JWT validation error:', sanitizedError);
+    
     return {
       success: false,
       response: createErrorResponse(
         'AUTHENTICATION_ERROR',
         'Invalid or expired token',
-        undefined,
+        'Please re-authenticate and try again',
         401
       )
     };
   }
+}
+
+/**
+ * Environment validation on startup
+ * Call this during application initialization
+ */
+export function validateEnvironmentOnStartup(): {
+  success: boolean;
+  errors: string[];
+  warnings: string[];
+} {
+  console.log('🔍 Validating environment configuration...');
+  
+  const envConfig = secureEnv.initialize();
+  
+  if (!envConfig.isValid) {
+    console.error('❌ Environment validation failed:');
+    envConfig.errors.forEach(error => console.error(`  - ${error}`));
+    
+    if (envConfig.warnings.length > 0) {
+      console.warn('⚠️ Environment warnings:');
+      envConfig.warnings.forEach(warning => console.warn(`  - ${warning}`));
+    }
+    
+    return {
+      success: false,
+      errors: envConfig.errors,
+      warnings: envConfig.warnings
+    };
+  }
+  
+  console.log('✅ Environment validation successful');
+  
+  if (envConfig.warnings.length > 0) {
+    console.warn('⚠️ Environment warnings:');
+    envConfig.warnings.forEach(warning => console.warn(`  - ${warning}`));
+  }
+  
+  // Log sanitized configuration for debugging
+  const sanitizedConfig = secureEnv.getSanitizedConfig();
+  console.log('📊 Environment configuration:', JSON.stringify(sanitizedConfig, null, 2));
+  
+  return {
+    success: true,
+    errors: [],
+    warnings: envConfig.warnings
+  };
 }
 
 /**

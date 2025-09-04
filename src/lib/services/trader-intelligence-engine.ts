@@ -31,11 +31,9 @@ export class TraderIntelligenceEngine {
    */
   async analyzeWallet(config: WalletAnalysisConfig): Promise<WalletAnalysisResult> {
     const _startTime = Date.now();
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const analysisId = `analysis_${++this.currentAnalysisId}_${Date.now()}`;
     
-    console.log(`🚀 Starting wallet analysis: ${analysisId}`);
-    console.log(`📊 Wallet: ${config.walletAddress}`);
-    console.log(`📅 Period: ${config.startDate ? new Date(config.startDate * 1000).toISOString() : 'All time'} to ${config.endDate ? new Date(config.endDate * 1000).toISOString() : 'Now'}`);
 
     const result: WalletAnalysisResult = {
       config,
@@ -53,7 +51,6 @@ export class TraderIntelligenceEngine {
 
     try {
       // Step 1: Fetch all historical transactions for the wallet
-      console.log(`🔍 Step 1: Fetching transaction history...`);
       const { signatures, errors: signatureErrors } = await solanaDataService.getWalletTransactionSignatures(
         config.walletAddress,
         {
@@ -65,14 +62,12 @@ export class TraderIntelligenceEngine {
       result.processingStats.totalTransactionsFetched = signatures.length;
 
       if (signatures.length === 0) {
-        console.warn(`⚠️ No transactions found for wallet ${config.walletAddress}`);
         result.status = 'failed';
         result.completedAt = Date.now();
         result.processingStats.processingTimeMs = Date.now() - _startTime;
         return result;
       }
 
-      console.log(`✅ Step 1 Complete: ${signatures.length} transaction signatures fetched`);
 
       // Step 2: Filter by time range if specified
       let filteredSignatures = signatures;
@@ -84,21 +79,17 @@ export class TraderIntelligenceEngine {
           _startTime,
           endTime
         );
-        console.log(`🗓️ Filtered to ${filteredSignatures.length} transactions in date range`);
       }
 
       // Step 3: Fetch detailed transaction data
-      console.log(`🔍 Step 2: Fetching detailed transaction data...`);
       const transactionSignatures = filteredSignatures.map(sig => sig.signature);
       const { transactions, errors: transactionErrors } = await solanaDataService.getTransactionDetails(
         transactionSignatures
       );
 
       result.processingStats.errors.push(...transactionErrors);
-      console.log(`✅ Step 2 Complete: ${transactions.length} detailed transactions fetched`);
 
       // Step 4: Parse Raydium swap transactions
-      console.log(`🔍 Step 3: Parsing Raydium swap transactions...`);
       const { swaps, errors: parsingErrors } = await raydiumParser.parseTransactions(
         transactions,
         config.walletAddress
@@ -108,21 +99,18 @@ export class TraderIntelligenceEngine {
       result.processingStats.validSwapsFound = swaps.length;
 
       if (swaps.length === 0) {
-        console.warn(`⚠️ No Raydium swaps found for wallet ${config.walletAddress}`);
         result.status = 'failed';
         result.completedAt = Date.now();
         result.processingStats.processingTimeMs = Date.now() - _startTime;
         return result;
       }
 
-      console.log(`✅ Step 3 Complete: ${swaps.length} Raydium swaps identified`);
 
       // Step 5: Apply additional filters
       let filteredSwaps = swaps;
       
       if (config.minTradeValueUsd) {
         // This filter will be applied after we get USD values in the next step
-        console.log(`🔍 Will apply minimum trade value filter: $${config.minTradeValueUsd}`);
       }
 
       if (config.includeTokens && config.includeTokens.length > 0) {
@@ -130,7 +118,6 @@ export class TraderIntelligenceEngine {
           config.includeTokens!.includes(swap.tokenIn.mint) ||
           config.includeTokens!.includes(swap.tokenOut.mint)
         );
-        console.log(`🔍 Filtered to ${filteredSwaps.length} swaps (include tokens)`);
       }
 
       if (config.excludeTokens && config.excludeTokens.length > 0) {
@@ -138,11 +125,9 @@ export class TraderIntelligenceEngine {
           !config.excludeTokens!.includes(swap.tokenIn.mint) &&
           !config.excludeTokens!.includes(swap.tokenOut.mint)
         );
-        console.log(`🔍 Filtered to ${filteredSwaps.length} swaps (exclude tokens)`);
       }
 
       // Step 6: Calculate P&L with USD cost basis
-      console.log(`💰 Step 4: Calculating P&L with USD cost basis...`);
       const { enhancedSwaps, positions, completedTrades, errors: pnlErrors } = await pnlCalculator.calculatePnLForSwaps(filteredSwaps);
       
       result.processingStats.errors.push(...pnlErrors);
@@ -151,17 +136,14 @@ export class TraderIntelligenceEngine {
       let finalEnhancedSwaps = enhancedSwaps;
       if (config.minTradeValueUsd) {
         finalEnhancedSwaps = enhancedSwaps.filter(swap => swap.tokenInUsdValue >= config.minTradeValueUsd!);
-        console.log(`🔍 Applied minimum trade value filter: ${finalEnhancedSwaps.length} swaps remaining`);
       }
 
       // Count missing price data
       const priceDataMissing = enhancedSwaps.length - finalEnhancedSwaps.length;
       result.processingStats.priceDataMissingCount = priceDataMissing;
 
-      console.log(`✅ Step 4 Complete: P&L calculated for ${finalEnhancedSwaps.length} swaps`);
 
       // Step 7: Calculate performance metrics
-      console.log(`📊 Step 5: Calculating performance metrics...`);
       
       const analysisStartDate = config.startDate || (completedTrades.length > 0 ? 
         Math.min(...completedTrades.map(t => t.entryTimestamp)) : 
@@ -180,14 +162,11 @@ export class TraderIntelligenceEngine {
 
       result.metrics = metrics;
 
-      console.log(`✅ Step 5 Complete: Performance metrics calculated`);
 
       // Step 8: Validate results
-      console.log(`🔍 Step 6: Validating results...`);
       const validation = performanceMetricsCalculator.validateMetrics(metrics);
       
       if (!validation.isValid) {
-        console.warn(`⚠️ Validation warnings:`, validation.warnings);
         result.processingStats.errors.push(...validation.warnings.map(warning => ({
           type: 'calculation_error' as const,
           message: `Validation warning: ${warning}`,
@@ -209,16 +188,6 @@ export class TraderIntelligenceEngine {
         });
       }
 
-      console.log(`✅ Analysis Complete!`);
-      console.log(`📊 Final Results:`);
-      console.log(`   • Net ROI: ${metrics.netRoi.toFixed(2)}%`);
-      console.log(`   • Max Drawdown: ${metrics.maxDrawdown.toFixed(2)}%`);
-      console.log(`   • Sharpe Ratio: ${metrics.sharpeRatio.toFixed(3)}`);
-      console.log(`   • Win/Loss Ratio: ${metrics.winLossRatio.toFixed(2)}`);
-      console.log(`   • Total Trades: ${metrics.totalTrades}`);
-      console.log(`   • Win Rate: ${metrics.winRate.toFixed(1)}%`);
-      console.log(`   • Data Quality: ${metrics.dataQuality}`);
-      console.log(`   • Confidence Score: ${metrics.confidenceScore}/100`);
 
     } catch {
       console.error(`❌ Fatal error in wallet analysis:`);
@@ -232,7 +201,6 @@ export class TraderIntelligenceEngine {
     } finally {
       result.completedAt = Date.now();
       result.processingStats.processingTimeMs = Date.now() - _startTime;
-      console.log(`⏱️ Total processing time: ${result.processingStats.processingTimeMs}ms`);
     }
 
     return result;
@@ -255,7 +223,6 @@ export class TraderIntelligenceEngine {
     };
   }> {
     // const _startTime = Date.now(); // Unused - removed for performance scoring
-    console.log(`🎯 Scoring ${walletAddresses.length} wallets with XORJ Trust Score`);
 
     // Analyze all wallets first
     const batchRequest: BatchAnalysisRequest = {
@@ -270,7 +237,6 @@ export class TraderIntelligenceEngine {
     const successfulResults = batchResult.walletResults.filter(r => r.status === 'completed');
     const walletMetrics = successfulResults.map(r => r.metrics);
 
-    console.log(`✅ Analysis complete: ${walletMetrics.length}/${walletAddresses.length} wallets analyzed`);
 
     // Calculate trust scores
     const { scores, cohortStats } = xorjTrustScoreCalculator.calculateTrustScores(walletMetrics);
@@ -296,8 +262,6 @@ export class TraderIntelligenceEngine {
     const _startTime = Date.now();
     const requestId = `batch_${Date.now()}`;
 
-    console.log(`🚀 Starting parallel batch analysis: ${requestId}`);
-    console.log(`📊 Wallets: ${request.walletAddresses.length}`);
 
     // Create a rate limiter to run 5 analyses concurrently
     // This respects API limits while maximizing throughput
@@ -308,10 +272,10 @@ export class TraderIntelligenceEngine {
     });
 
     // Create analysis promises for all wallets
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const analysisPromises = request.walletAddresses.map((walletAddress, index) => 
       // Wrap the analysis call in the rate limiter
       limit(async () => {
-        console.log(`📈 Processing wallet ${index + 1}/${request.walletAddresses.length}: ${walletAddress}`);
         
         try {
           const walletConfig: WalletAnalysisConfig = {
@@ -349,7 +313,6 @@ export class TraderIntelligenceEngine {
     );
 
     // Use Promise.allSettled to wait for all promises to resolve, even if some fail
-    console.log(`⚡ Running ${analysisPromises.length} analyses in parallel (max 5 concurrent)...`);
     const results = await Promise.allSettled(analysisPromises);
 
     // Process results and handle any rejections
@@ -383,6 +346,7 @@ export class TraderIntelligenceEngine {
     // Calculate summary statistics
     const completedWallets = walletResults.filter(r => r.status === 'completed').length;
     const failedWallets = walletResults.filter(r => r.status === 'failed').length;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const totalTime = Date.now() - _startTime;
     const avgProcessingTime = walletResults.length > 0 ? 
       walletResults.reduce((sum, result) => sum + result.processingStats.processingTimeMs, 0) / walletResults.length : 0;
@@ -400,10 +364,6 @@ export class TraderIntelligenceEngine {
       completedAt: Date.now()
     };
 
-    console.log(`✅ Parallel batch analysis complete: ${requestId}`);
-    console.log(`📊 Results: ${completedWallets}/${request.walletAddresses.length} successful`);
-    console.log(`⚡ Performance improvement: Parallel processing reduced total time to ${totalTime}ms`);
-    console.log(`📈 Throughput: ~${(request.walletAddresses.length / (totalTime / 1000)).toFixed(2)} wallets/second`);
 
     return batchResult;
   }
@@ -420,7 +380,6 @@ export class TraderIntelligenceEngine {
     };
     lastCheck: number;
   }> {
-    console.log(`🔍 Checking engine health...`);
 
     try {
       // Check Solana RPC connection
