@@ -355,7 +355,6 @@ class PerformanceCalculator:
             maximum_drawdown_percent=maximum_drawdown_percent.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP),
             sharpe_ratio=sharpe_ratio.quantize(Decimal('0.001'), rounding=ROUND_HALF_UP),
             win_loss_ratio=win_loss_ratio.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP),
-            total_trades=total_trades,
             total_volume_usd=total_volume_usd.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP),
             total_fees_usd=total_fees_usd.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP),
             total_profit_usd=total_profit_usd.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP),

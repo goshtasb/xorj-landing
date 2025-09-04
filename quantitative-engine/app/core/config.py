@@ -4,12 +4,12 @@ Centralized configuration using Pydantic Settings for type safety and validation
 """
 
 from typing import List, Optional
-from pydantic import BaseSettings, validator
-from pydantic_settings import BaseSettings as PydanticBaseSettings
+from pydantic import validator
+from pydantic_settings import BaseSettings
 import os
 
 
-class Settings(PydanticBaseSettings):
+class Settings(BaseSettings):
     """Application settings with environment variable support and validation"""
     
     # Application Configuration
@@ -27,8 +27,8 @@ class Settings(PydanticBaseSettings):
     redis_url: str = "redis://localhost:6379"
     
     # Solana RPC Configuration
-    solana_rpc_url: str = "https://api.devnet.solana.com"
-    helius_api_key: Optional[str] = None
+    solana_rpc_url: str = "https://mainnet.helius-rpc.com/?api-key=e5fdf1c6-20b1-48b6-b33c-4be56e8e219c"
+    helius_api_key: Optional[str] = "e5fdf1c6-20b1-48b6-b33c-4be56e8e219c"
     solana_commitment_level: str = "confirmed"
     
     # Price Data APIs

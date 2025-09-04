@@ -58,14 +58,16 @@ class CorrelationContext:
         self.tokens = []
     
     def __enter__(self):
-        for key, value in self.context.items():
-            token = structlog.contextvars.bind_contextvars(**{key: value})
-            self.tokens.append(token)
+        # Use clear_contextvars and then bind all at once
+        self.old_context = structlog.contextvars.get_contextvars()
+        structlog.contextvars.bind_contextvars(**self.context)
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        for token in reversed(self.tokens):
-            token.__exit__(exc_type, exc_val, exc_tb)
+        # Restore the old context
+        structlog.contextvars.clear_contextvars()
+        if self.old_context:
+            structlog.contextvars.bind_contextvars(**self.old_context)
 
 
 class RequestLogger:

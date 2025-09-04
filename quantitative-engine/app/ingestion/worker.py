@@ -127,7 +127,8 @@ class DataIngestionWorker:
                 # Filter by date if specified
                 filtered_signatures = []
                 for sig_info in signatures:
-                    block_time = sig_info.get('blockTime')
+                    # Handle solders object properties
+                    block_time = getattr(sig_info, 'block_time', None)
                     if not block_time:
                         continue
                     
@@ -153,7 +154,7 @@ class DataIngestionWorker:
                 
                 # Set up for next batch
                 if signatures:
-                    before_signature = signatures[-1].get('signature')
+                    before_signature = str(getattr(signatures[-1], 'signature', None))
                     
                 logger.debug(
                     "Fetched signature batch",
@@ -213,7 +214,7 @@ class DataIngestionWorker:
         )
         
         # Extract signature strings
-        sig_strings = [sig['signature'] for sig in signatures if sig.get('signature')]
+        sig_strings = [str(getattr(sig, 'signature', None)) for sig in signatures if getattr(sig, 'signature', None)]
         
         # Fetch transactions in batches
         try:
