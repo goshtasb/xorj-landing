@@ -1,42 +1,12 @@
-# XORJ Quantitative Engine - Render Optimized Dependencies
-# Python 3.11+ required for Render
-
-# Core Framework
+# XORJ Quantitative Engine - Minimal Dependencies for Deployment
 fastapi==0.104.1
-uvicorn[standard]==0.24.0
+uvicorn==0.24.0
 pydantic==2.5.0
-pydantic-settings==2.1.0
-
-# Data Processing
-pandas==2.1.4
-numpy==1.25.2
-pytz==2023.3
-
-# Database
 sqlalchemy==2.0.23
 asyncpg==0.29.0
-
-# HTTP Client & API
 httpx==0.25.2
-aiohttp==3.9.1
 requests==2.31.0
-
-# Solana Integration
-solana==0.32.0
-base58==2.1.1
-
-# Task Scheduling
 celery==5.3.4
 redis==5.0.1
-
-# Validation & Schema
-jsonschema==4.20.0
-
-# Security
-cryptography==41.0.8
-
-# Environment Management
 python-dotenv==1.0.0
-
-# Production Server
-gunicorn==21.2.0# Trigger rebuild
+gunicorn==21.2.0
