@@ -1,0 +1,79 @@
+# Render deployment configuration for XORJ Quantitative Engine
+services:
+  # Web service (FastAPI)
+  - type: web
+    name: xorj-quantitative-engine-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        value: postgresql://postgres.yywoynutnrkvpunnvvla:YOUR_SUPABASE_PASSWORD@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+      - key: SUPABASE_URL
+        value: https://yywoynutnrkvpunnvvla.supabase.co
+      - key: SUPABASE_ANON_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d285bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUzNjY2MzQsImV4cCI6MjA3MDk0MjYzNH0.VYhT1Utp3NGFmCmFZH6Fvt75axIDCOCajDPZJKVMYpQ
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d285bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NTM2NjYzNCwiZXhwIjoyMDcwOTQyNjM0fQ.ahWp9DgWXU4S4VI3Y_GtYN2rF32JAww8tDs2idoyRy4
+      - key: REDIS_URL
+        value: YOUR_UPSTASH_REDIS_URL
+      - key: HELIUS_API_KEY
+        value: e5fdf1c6-20b1-48b6-b33c-4be56e8e219c
+      - key: SOLANA_RPC_URL
+        value: https://mainnet.helius-rpc.com/?api-key=e5fdf1c6-20b1-48b6-b33c-4be56e8e219c
+      - key: XORJ_INTERNAL_API_KEY
+        value: xorj-internal-api-key-v1-prod-2025
+
+  # Background worker (Celery worker)
+  - type: worker
+    name: xorj-quantitative-engine-worker
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A app.worker worker --loglevel=info
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        value: postgresql://postgres.yywoynutnrkvpunnvvla:YOUR_SUPABASE_PASSWORD@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+      - key: SUPABASE_URL
+        value: https://yywoynutnrkvpunnvvla.supabase.co
+      - key: SUPABASE_ANON_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d285bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUzNjY2MzQsImV4cCI6MjA3MDk0MjYzNH0.VYhT1Utp3NGFmCmFZH6Fvt75axIDCOCajDPZJKVMYpQ
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d285bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NTM2NjYzNCwiZXhwIjoyMDcwOTQyNjM0fQ.ahWp9DgWXU4S4VI3Y_GtYN2rF32JAww8tDs2idoyRy4
+      - key: REDIS_URL
+        value: YOUR_UPSTASH_REDIS_URL
+      - key: HELIUS_API_KEY
+        value: e5fdf1c6-20b1-48b6-b33c-4be56e8e219c
+      - key: SOLANA_RPC_URL
+        value: https://mainnet.helius-rpc.com/?api-key=e5fdf1c6-20b1-48b6-b33c-4be56e8e219c
+      - key: XORJ_INTERNAL_API_KEY
+        value: xorj-internal-api-key-v1-prod-2025
+
+  # Task scheduler (Celery beat)
+  - type: worker
+    name: xorj-quantitative-engine-beat
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A app.worker beat --loglevel=info
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        value: postgresql://postgres.yywoynutnrkvpunnvvla:YOUR_SUPABASE_PASSWORD@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+      - key: SUPABASE_URL
+        value: https://yywoynutnrkvpunnvvla.supabase.co
+      - key: SUPABASE_ANON_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d285bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUzNjY2MzQsImV4cCI6MjA3MDk0MjYzNH0.VYhT1Utp3NGFmCmFZH6Fvt75axIDCOCajDPZJKVMYpQ
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl5d285bnVnbnJrdnB1bm52dmxhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NTM2NjYzNCwiZXhwIjoyMDcwOTQyNjM0fQ.ahWp9DgWXU4S4VI3Y_GtYN2rF32JAww8tDs2idoyRy4
+      - key: REDIS_URL
+        value: YOUR_UPSTASH_REDIS_URL
+      - key: HELIUS_API_KEY
+        value: e5fdf1c6-20b1-48b6-b33c-4be56e8e219c
+      - key: SOLANA_RPC_URL
+        value: https://mainnet.helius-rpc.com/?api-key=e5fdf1c6-20b1-48b6-b33c-4be56e8e219c
+      - key: XORJ_INTERNAL_API_KEY
+        value: xorj-internal-api-key-v1-prod-2025
