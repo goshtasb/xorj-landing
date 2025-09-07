@@ -6,6 +6,7 @@ import asyncio
 import asyncpg
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timezone, timedelta
+from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import text, select, func, and_, or_, desc
 import logging
@@ -67,11 +68,13 @@ class DatabaseService:
             logger.error(f"Failed to initialize database service: {e}")
             raise RuntimeError(f"Database initialization failed: {e}")
     
-    async def get_session(self) -> AsyncSession:
+    @asynccontextmanager
+    async def get_session(self):
         """Get a database session"""
         if not self._session_factory:
             await self.initialize()
-        return self._session_factory()
+        async with self._session_factory() as session:
+            yield session
     
     async def health_check(self) -> bool:
         """Check database connectivity"""
@@ -108,6 +111,7 @@ class DatabaseService:
                 )
                 
                 latest_calc_time = recent_ranking.scalar()
+                logger.info(f"Latest calculation time for period_days={period_days}: {latest_calc_time}")
                 
                 if not latest_calc_time:
                     # No rankings available, trigger calculation
@@ -139,7 +143,10 @@ class DatabaseService:
                 })
                 
                 traders = []
+                row_count = 0
                 for row in result:
+                    row_count += 1
+                    logger.debug(f"Processing trader row {row_count}: {row.wallet_address}")
                     # Parse the JSON performance metrics
                     metrics = row.performance_metrics
                     
@@ -251,70 +258,62 @@ class DatabaseService:
     
     async def _seed_mainnet_traders(self, session: AsyncSession):
         """
-        Seed database with known high-performing mainnet traders for immediate functionality
+        Initialize trader discovery from live mainnet data
         """
-        # These are real mainnet addresses of known successful traders/protocols
-        seed_traders = [
-            {
-                "wallet_address": "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1",
-                "trust_score": 85.5,
-                "net_roi_percent": 45.2,
-                "sharpe_ratio": 2.8,
-                "total_trades": 156,
-                "total_volume_usd": 1250000.0
-            },
-            {
-                "wallet_address": "36c6VgswjHahVQrWvWkKZApW4GSmWy1VUcMHW1Kq7Vdr",  
-                "trust_score": 78.3,
-                "net_roi_percent": 32.1,
-                "sharpe_ratio": 2.1,
-                "total_trades": 203,
-                "total_volume_usd": 890000.0
-            },
-            {
-                "wallet_address": "CuieVDEDtLo7FypA9SbLM9saXFdb1dsshEkyErMqkRQq",
-                "trust_score": 72.1,
-                "net_roi_percent": 28.7,
-                "sharpe_ratio": 1.9,
-                "total_trades": 89,
-                "total_volume_usd": 450000.0
-            }
-        ]
+        # No longer seed with static data - discovery happens through trader_discovery service
+        from ..blockchain.trader_discovery import get_trader_discovery
         
-        for trader_data in seed_traders:
-            # Create trader profile
-            profile = TraderProfile(
-                wallet_address=trader_data["wallet_address"],
-                total_trades=trader_data["total_trades"],
-                total_volume_sol=trader_data["total_volume_usd"] / 150.0,  # Estimate SOL value
-                current_trust_score=trader_data["trust_score"],
-                is_active=True
-            )
-            session.add(profile)
+        try:
+            discovery = await get_trader_discovery()
+            mainnet_traders = await discovery.discover_top_traders(limit=20)
             
-            # Create performance metrics
-            metrics = TraderPerformanceMetrics(
-                wallet_address=trader_data["wallet_address"],
-                calculation_date=datetime.now(timezone.utc),
-                period_days=90,
-                total_trades=trader_data["total_trades"],
-                total_volume_usd=trader_data["total_volume_usd"],
-                total_profit_usd=trader_data["total_volume_usd"] * trader_data["net_roi_percent"] / 100.0,
-                net_roi_percent=trader_data["net_roi_percent"],
-                sharpe_ratio=trader_data["sharpe_ratio"],
-                maximum_drawdown_percent=15.0,  # Conservative estimate
-                win_loss_ratio=2.5,  # Estimate
-                trust_score=trader_data["trust_score"],
-                performance_score=0.65,
-                risk_penalty=0.15,
-                data_points=trader_data["total_trades"],
-                winning_trades=int(trader_data["total_trades"] * 0.7),
-                losing_trades=int(trader_data["total_trades"] * 0.3)
-            )
-            session.add(metrics)
-        
-        await session.commit()
-        logger.info(f"Seeded database with {len(seed_traders)} mainnet traders")
+            if mainnet_traders:
+                logger.info(f"Discovered {len(mainnet_traders)} traders from mainnet analysis")
+                # These are live discovered traders, not seed data
+                for i, trader in enumerate(mainnet_traders[:10]):  # Store top 10
+                    try:
+                        # Create trader profile from discovery
+                        profile = TraderProfile(
+                            wallet_address=trader["wallet_address"],
+                            total_trades=trader["metrics"]["total_trades"],
+                            total_volume_sol=trader["metrics"]["total_volume_usd"] / 150.0,
+                            current_trust_score=trader["trust_score"],
+                            is_active=True
+                        )
+                        session.add(profile)
+                        
+                        # Create performance metrics from discovery
+                        metrics = TraderPerformanceMetrics(
+                            wallet_address=trader["wallet_address"],
+                            calculation_date=datetime.now(timezone.utc),
+                            period_days=90,
+                            total_trades=trader["metrics"]["total_trades"],
+                            total_volume_usd=trader["metrics"]["total_volume_usd"],
+                            total_profit_usd=trader["metrics"]["total_profit_usd"],
+                            net_roi_percent=trader["metrics"]["net_roi_percent"],
+                            sharpe_ratio=trader["metrics"]["sharpe_ratio"],
+                            maximum_drawdown_percent=trader["metrics"]["maximum_drawdown_percent"],
+                            win_loss_ratio=trader["metrics"]["win_loss_ratio"],
+                            trust_score=trader["trust_score"],
+                            performance_score=trader["performance_breakdown"]["performance_score"],
+                            risk_penalty=trader["performance_breakdown"]["risk_penalty"],
+                            data_points=trader["metrics"]["total_trades"],
+                            winning_trades=int(trader["metrics"]["total_trades"] * 0.6),  # Estimate
+                            losing_trades=int(trader["metrics"]["total_trades"] * 0.4)   # Estimate
+                        )
+                        session.add(metrics)
+                    except Exception as e:
+                        logger.debug(f"Error storing discovered trader {trader.get('wallet_address')}: {e}")
+                        continue
+                
+                await session.commit()
+                logger.info(f"Initialized database with {len(mainnet_traders)} discovered mainnet traders")
+            else:
+                logger.warning("No mainnet traders discovered during initialization")
+                
+        except Exception as e:
+            logger.error(f"Error during mainnet trader discovery initialization: {e}")
+            # Don't fail initialization if discovery fails
     
     async def _get_seeded_rankings(
         self, 

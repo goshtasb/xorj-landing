@@ -42,35 +42,94 @@ class RaydiumTransactionParser:
     
     def is_raydium_transaction(self, transaction: Dict[str, Any]) -> bool:
         """
-        Check if transaction involves Raydium program
+        Check if transaction involves supported DEX programs (Raydium, Jupiter, Orca, Serum)
         
         Args:
             transaction: Parsed transaction data from Solana RPC
             
         Returns:
-            True if transaction involves Raydium program
+            True if transaction involves any supported DEX program
         """
-        if not transaction or 'transaction' not in transaction:
+        if not transaction:
             return False
         
-        tx_data = transaction['transaction']
-        if 'message' not in tx_data:
+        # Handle both dict and solders object formats
+        if hasattr(transaction, 'transaction'):
+            # Solders object - access attributes directly
+            tx_data = transaction.transaction
+        elif hasattr(transaction, '__dict__'):
+            # Convert solders object to dict for consistent access
+            transaction = transaction.__dict__
+            if 'transaction' not in transaction:
+                return False
+            tx_data = transaction['transaction']
+        elif isinstance(transaction, dict):
+            if 'transaction' not in transaction:
+                return False
+            tx_data = transaction['transaction']
+        else:
             return False
         
-        message = tx_data['message']
+        # Handle nested solders objects in transaction data
+        if hasattr(tx_data, 'message'):
+            message = tx_data.message
+        elif hasattr(tx_data, '__dict__') and 'message' in tx_data.__dict__:
+            message = tx_data.__dict__['message']
+        elif isinstance(tx_data, dict) and 'message' in tx_data:
+            message = tx_data['message']
+        else:
+            return False
         
-        # Check account keys for Raydium program
-        if 'accountKeys' in message:
-            for account in message['accountKeys']:
-                if isinstance(account, dict) and account.get('pubkey') == self.raydium_program_id:
-                    return True
-                elif isinstance(account, str) and account == self.raydium_program_id:
-                    return True
+        # Get all supported DEX program IDs
+        supported_programs = [
+            self.raydium_program_id,
+            "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4K",  # Jupiter
+            "9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP",  # Orca
+            "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",  # Serum
+        ]
         
-        # Check instructions for Raydium program
-        if 'instructions' in message:
-            for instruction in message['instructions']:
-                if instruction.get('programId') == self.raydium_program_id:
+        # Handle message attributes vs dict access
+        if hasattr(message, 'account_keys'):
+            account_keys = message.account_keys
+        elif hasattr(message, '__dict__') and 'accountKeys' in message.__dict__:
+            account_keys = message.__dict__['accountKeys']
+        elif isinstance(message, dict) and 'accountKeys' in message:
+            account_keys = message['accountKeys']
+        else:
+            account_keys = []
+        
+        # Check account keys for any supported DEX program
+        for account in account_keys:
+            if hasattr(account, 'pubkey'):
+                pubkey = str(account.pubkey)
+                if pubkey in supported_programs:
+                    return True
+            elif isinstance(account, dict):
+                pubkey = account.get('pubkey')
+                if pubkey in supported_programs:
+                    return True
+            elif isinstance(account, str) and account in supported_programs:
+                return True
+        
+        # Handle instructions attributes vs dict access
+        if hasattr(message, 'instructions'):
+            instructions = message.instructions
+        elif hasattr(message, '__dict__') and 'instructions' in message.__dict__:
+            instructions = message.__dict__['instructions']
+        elif isinstance(message, dict) and 'instructions' in message:
+            instructions = message['instructions']
+        else:
+            instructions = []
+        
+        # Check instructions for any supported DEX program
+        for instruction in instructions:
+            if hasattr(instruction, 'program_id'):
+                program_id = str(instruction.program_id)
+                if program_id in supported_programs:
+                    return True
+            elif isinstance(instruction, dict):
+                program_id = instruction.get('programId') or instruction.get('program_id')
+                if program_id in supported_programs:
                     return True
         
         return False
@@ -87,21 +146,54 @@ class RaydiumTransactionParser:
         """
         balance_changes = {}
         
-        if not transaction or 'meta' not in transaction:
+        # Handle both dict and solders object formats for transaction
+        if hasattr(transaction, 'meta'):
+            # Solders object - access attributes directly
+            meta = transaction.meta
+        elif hasattr(transaction, '__dict__'):
+            transaction = transaction.__dict__
+            if not transaction or 'meta' not in transaction:
+                return balance_changes
+            meta = transaction['meta']
+        elif isinstance(transaction, dict):
+            if not transaction or 'meta' not in transaction:
+                return balance_changes
+            meta = transaction['meta']
+        else:
             return balance_changes
         
-        meta = transaction['meta']
-        
-        # Extract from preTokenBalances and postTokenBalances
-        pre_balances = meta.get('preTokenBalances', [])
-        post_balances = meta.get('postTokenBalances', [])
+        # Handle meta attributes vs dict access
+        if hasattr(meta, 'pre_token_balances'):
+            pre_balances = meta.pre_token_balances or []
+            post_balances = meta.post_token_balances or []
+        elif hasattr(meta, '__dict__'):
+            meta_dict = meta.__dict__
+            pre_balances = meta_dict.get('preTokenBalances', [])
+            post_balances = meta_dict.get('postTokenBalances', [])
+        elif isinstance(meta, dict):
+            pre_balances = meta.get('preTokenBalances', [])
+            post_balances = meta.get('postTokenBalances', [])
+        else:
+            pre_balances = []
+            post_balances = []
         
         # Create lookup for pre-balances
         pre_lookup = {}
         for balance in pre_balances:
-            account = balance.get('owner')
-            mint = balance.get('mint')
-            amount = balance.get('uiTokenAmount', {}).get('uiAmount', 0)
+            # Handle solders balance objects vs dict
+            if hasattr(balance, 'owner'):
+                account = str(balance.owner)
+                mint = str(balance.mint)
+                if hasattr(balance, 'ui_token_amount') and balance.ui_token_amount:
+                    amount = balance.ui_token_amount.ui_amount or 0
+                else:
+                    amount = 0
+            elif isinstance(balance, dict):
+                account = balance.get('owner')
+                mint = balance.get('mint')
+                amount = balance.get('uiTokenAmount', {}).get('uiAmount', 0)
+            else:
+                continue
             
             if account and mint:
                 if account not in pre_lookup:
@@ -110,10 +202,23 @@ class RaydiumTransactionParser:
         
         # Calculate changes using post-balances
         for balance in post_balances:
-            account = balance.get('owner')
-            mint = balance.get('mint')
-            post_amount = balance.get('uiTokenAmount', {}).get('uiAmount', 0)
-            decimals = balance.get('uiTokenAmount', {}).get('decimals', 0)
+            # Handle solders balance objects vs dict
+            if hasattr(balance, 'owner'):
+                account = str(balance.owner)
+                mint = str(balance.mint)
+                if hasattr(balance, 'ui_token_amount') and balance.ui_token_amount:
+                    post_amount = balance.ui_token_amount.ui_amount or 0
+                    decimals = balance.ui_token_amount.decimals or 0
+                else:
+                    post_amount = 0
+                    decimals = 0
+            elif isinstance(balance, dict):
+                account = balance.get('owner')
+                mint = balance.get('mint')
+                post_amount = balance.get('uiTokenAmount', {}).get('uiAmount', 0)
+                decimals = balance.get('uiTokenAmount', {}).get('decimals', 0)
+            else:
+                continue
             
             if not account or not mint:
                 continue
@@ -146,6 +251,10 @@ class RaydiumTransactionParser:
         Returns:
             SwapType enum value
         """
+        # Handle both dict and solders object formats
+        if hasattr(transaction, '__dict__'):
+            transaction = transaction.__dict__
+        
         if not transaction or 'transaction' not in transaction:
             return SwapType.UNKNOWN
         
@@ -190,6 +299,10 @@ class RaydiumTransactionParser:
         pool_id = None
         program_id = self.raydium_program_id
         
+        # Handle both dict and solders object formats
+        if hasattr(transaction, '__dict__'):
+            transaction = transaction.__dict__
+        
         if not transaction or 'transaction' not in transaction:
             return pool_id, program_id
         
@@ -231,18 +344,40 @@ class RaydiumTransactionParser:
             if not transaction or not self.is_raydium_transaction(transaction):
                 return None
             
-            # Extract basic transaction info
-            block_time = transaction.get('blockTime')
+            # Extract basic transaction info - handle both dict and solders object formats
+            if hasattr(transaction, 'block_time'):
+                # Solders object
+                block_time = transaction.block_time
+                slot = transaction.slot
+                meta = transaction.meta if hasattr(transaction, 'meta') else None
+            elif hasattr(transaction, '__dict__'):
+                # Convert solders object to dict
+                tx_dict = transaction.__dict__
+                block_time = tx_dict.get('blockTime')
+                slot = tx_dict.get('slot', 0)
+                meta = tx_dict.get('meta', {})
+            elif isinstance(transaction, dict):
+                # Already a dict
+                block_time = transaction.get('blockTime')
+                slot = transaction.get('slot', 0)
+                meta = transaction.get('meta', {})
+            else:
+                logger.warning("Unknown transaction format", signature=signature, type=type(transaction))
+                return None
+            
             if not block_time:
                 logger.warning("Transaction missing block time", signature=signature)
                 return None
             
             block_time_dt = datetime.fromtimestamp(block_time, timezone.utc)
-            slot = transaction.get('slot', 0)
             
             # Determine transaction status
-            meta = transaction.get('meta', {})
-            err = meta.get('err')
+            if hasattr(meta, 'err'):
+                err = meta.err
+            elif isinstance(meta, dict):
+                err = meta.get('err')
+            else:
+                err = None
             status = TransactionStatus.FAILED if err else TransactionStatus.SUCCESS
             
             # Extract token balance changes
@@ -275,11 +410,12 @@ class RaydiumTransactionParser:
                 amount = change_info['amount']
                 decimals = change_info['decimals']
                 
-                # Skip if not supported token
-                if mint not in self.mint_to_symbol:
-                    continue
-                
-                symbol = self.mint_to_symbol[mint]
+                # Get symbol from known mints, or use mint address prefix as symbol
+                if mint in self.mint_to_symbol:
+                    symbol = self.mint_to_symbol[mint]
+                else:
+                    # For unknown tokens, use first 8 characters of mint as symbol
+                    symbol = mint[:8].upper()
                 
                 if amount < 0:  # Token decreased = input token
                     token_in = TokenBalance(
@@ -315,7 +451,12 @@ class RaydiumTransactionParser:
                 pool_id = "unknown_pool"
             
             # Extract transaction fee
-            fee_lamports = meta.get('fee', 0)
+            if hasattr(meta, 'fee'):
+                fee_lamports = meta.fee or 0
+            elif isinstance(meta, dict):
+                fee_lamports = meta.get('fee', 0)
+            else:
+                fee_lamports = 0
             
             # Create the swap object
             raydium_swap = RaydiumSwap(

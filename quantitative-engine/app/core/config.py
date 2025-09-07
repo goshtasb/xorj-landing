@@ -15,10 +15,11 @@ class Settings(BaseSettings):
     # Application Configuration
     app_name: str = "XORJ Quantitative Engine"
     version: str = "1.0.0"
-    environment: str = "development"
+    environment: str = "production"
     debug: bool = False
     secret_key: str = "change-this-in-production"
     api_key: str = "your-internal-api-key"
+    xorj_internal_api_key: str = "your-internal-api-key"
     
     # Database Configuration
     database_url: str = "postgresql://xorj:xorj_password@localhost:5432/xorj_quant"
@@ -30,6 +31,12 @@ class Settings(BaseSettings):
     solana_rpc_url: str = "https://mainnet.helius-rpc.com/?api-key=e5fdf1c6-20b1-48b6-b33c-4be56e8e219c"
     helius_api_key: Optional[str] = "e5fdf1c6-20b1-48b6-b33c-4be56e8e219c"
     solana_commitment_level: str = "confirmed"
+    
+    # Rate Limiting Configuration - Premium Helius API
+    rpc_requests_per_second: float = 50.0  # Premium API allows higher rates
+    rpc_burst_limit: int = 100  # Allow larger bursts for premium
+    rpc_cache_ttl_seconds: int = 15  # Shorter cache for fresher data
+    rpc_retry_delay_seconds: float = 0.5  # Shorter retry delay
     
     # Price Data APIs
     coingecko_api_key: Optional[str] = None
@@ -44,13 +51,15 @@ class Settings(BaseSettings):
     max_concurrent_workers: int = 2
     task_timeout_seconds: int = 3600
     
-    # Scheduling Configuration
-    ingestion_schedule_hours: int = 4
+    # Scheduling Configuration  
+    ingestion_schedule_hours: int = 4  # Run every 4 hours for active monitoring
     
     # Data Validation Configuration
-    max_transactions_per_wallet: int = 10000
+    max_transactions_per_wallet: int = 100000  # Increased for high-frequency traders
+    transaction_threshold: int = 50000  # Increased threshold - only sample for VERY high volume
+    num_samples_per_day: int = 100  # Increased samples - capture more transactions per day
     min_trade_value_usd: float = 1.0
-    supported_tokens: str = "SOL,USDC,USDT,RAY,BONK,JUP"
+    supported_tokens: str = "SOL,USDC,USDT,RAY,BONK,JUP,WIF,POPCAT,PEPE,MOODENG,GOAT,PNUT,ACT,FIDA,SRM,ORCA,SAMO,COPE,STEP,MEDIA,ROPE,ATLAS,STAR,GRAPE,SLIM,GME,WOOF,SLRS,POLIS,SHDW,MNGO,TULIP,PORT,LIQ,BSKT,CRWNY,KING,BASIS,MAPS,UXD,SUNNY,SBR,AURY,MEAN,SOCN,NINJA,JSOL,MSOL,STSOL,DXBL,REAL,PRT,DIP,LIKE,GST,GMT,CHEEMS,DOGE,SHIB,APT,BTC,ETH,BNB,ADA,AVAX,DOT,MATIC,LINK,UNI,ICP,NEAR,ALGO,FTM,XLM,VET,ETC,FIL,HBAR,EGLD,XTZ,THETA,MANA,SAND,CAKE,KLAY,MIOTA,BTT,ENJ,CHZ,BAT,SUSHI,YFI,COMP,MKR,AAVE,SNX,CRV,1INCH,ZRX,REN,LRC,KNC,BAL,UMA"
     
     # Monitoring Configuration
     prometheus_port: int = 9090
@@ -65,8 +74,21 @@ class Settings(BaseSettings):
     retry_backoff_multiplier: float = 2.0
     max_retry_delay_seconds: int = 300
     
-    # Raydium Program Configuration
+    # DEX Program Configuration
     raydium_program_id: str = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
+    jupiter_program_id: str = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4K"
+    orca_program_id: str = "9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP"
+    serum_program_id: str = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"
+    
+    # All supported DEX program IDs
+    def get_supported_dex_programs(self) -> List[str]:
+        """Get list of all supported DEX program IDs"""
+        return [
+            self.raydium_program_id,
+            self.jupiter_program_id,
+            self.orca_program_id,
+            self.serum_program_id,
+        ]
     
     # Performance Metrics Configuration
     metrics_rolling_period_days: int = 90

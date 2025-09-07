@@ -180,11 +180,13 @@ class PortfolioComparison:
         and identify what needs to be rebalanced.
         """
         if not self.current_portfolio.total_usd_value or self.current_portfolio.total_usd_value <= 0:
-            logger.warning(
-                "Cannot calculate discrepancies - portfolio has no USD value",
+            logger.info(
+                "Portfolio has no USD value - attempting balance-based copy trading analysis",
                 user_id=self.user_id,
-                vault_address=self.vault_address
+                vault_address=self.vault_address,
+                holdings_count=len(self.current_portfolio.holdings)
             )
+            self._calculate_balance_based_discrepancies()
             return
         
         current_allocations = self.current_portfolio.get_allocation_percentages()
@@ -250,6 +252,88 @@ class PortfolioComparison:
             rebalance_required=self.rebalance_required,
             total_rebalance_amount=str(self.total_rebalance_amount),
             discrepancies_count=len(self.discrepancies)
+        )
+    
+    def _calculate_balance_based_discrepancies(self):
+        """
+        Calculate discrepancies using balance-based analysis for copy trading.
+        
+        This method is used when USD pricing is not available (mega-wallets with dust tokens).
+        It focuses on detecting significant balance changes and new token acquisitions.
+        """
+        logger.info(
+            "Starting balance-based discrepancy analysis for copy trading",
+            user_id=self.user_id,
+            vault_address=self.vault_address
+        )
+        
+        # Focus on tokens with significant balances (>0.1 tokens or with USD value)
+        significant_holdings = []
+        for holding in self.current_portfolio.holdings:
+            if (holding.scaled_balance > Decimal("0.1") or 
+                (holding.usd_value and holding.usd_value > Decimal("1.0"))):
+                significant_holdings.append(holding)
+        
+        # For copy trading, we look for new/changed tokens in target allocations
+        for target_allocation in self.target_allocations:
+            symbol = target_allocation.symbol
+            current_holding = self.current_portfolio.get_holding(symbol)
+            
+            # If target has this token but we don't hold significant amounts
+            if not current_holding or not current_holding.is_significant:
+                # Generate a copy trade for this token
+                # Use a standard amount for balance-based trading
+                trade_amount = Decimal("10.0")  # $10 equivalent for balance-based trades
+                
+                self.discrepancies[symbol] = trade_amount
+                self.rebalance_required = True
+                self.total_rebalance_amount += trade_amount
+                
+                logger.info(
+                    "Balance-based discrepancy detected - need to acquire token",
+                    symbol=symbol,
+                    current_balance=str(current_holding.scaled_balance) if current_holding else "0",
+                    target_percentage=str(target_allocation.target_percentage),
+                    trade_amount=str(trade_amount)
+                )
+        
+        # Check for tokens we hold significantly but aren't in target
+        for holding in significant_holdings:
+            target_exists = any(ta.symbol.upper() == holding.symbol.upper() 
+                              for ta in self.target_allocations)
+            
+            if not target_exists:
+                # For holdings with USD value > $5, use that value
+                if holding.usd_value and holding.usd_value > Decimal("5.0"):
+                    reduce_amount = holding.usd_value
+                # For significant holdings without USD pricing (like SOL), 
+                # use a reasonable default amount to fund purchases
+                elif holding.scaled_balance > Decimal("0.1") and self.discrepancies:
+                    # We have tokens to buy, so we need to sell some of this holding
+                    reduce_amount = Decimal("10.0")  # $10 equivalent for balance-based trades
+                else:
+                    continue
+                
+                self.discrepancies[holding.symbol] = -reduce_amount
+                self.rebalance_required = True
+                self.total_rebalance_amount += reduce_amount
+                
+                logger.info(
+                    "Balance-based discrepancy detected - holding not in target",
+                    symbol=holding.symbol,
+                    current_usd_value=str(holding.usd_value) if holding.usd_value else "unknown",
+                    current_balance=str(holding.scaled_balance),
+                    reduce_amount=str(reduce_amount),
+                    reason="funding_required" if not holding.usd_value else "usd_value_based"
+                )
+        
+        logger.info(
+            "Balance-based discrepancy calculation completed",
+            user_id=self.user_id,
+            rebalance_required=self.rebalance_required,
+            total_rebalance_amount=str(self.total_rebalance_amount),
+            discrepancies_count=len(self.discrepancies),
+            method="balance_based_copy_trading"
         )
     
     def get_tokens_to_buy(self) -> Dict[str, Decimal]:

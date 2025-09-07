@@ -14,16 +14,16 @@ interface RetryableRpcError {
 
 interface RpcRequest {
   method: string;
-  params?: any[];
+  params?: unknown[];
   id?: string | number;
 }
 
-interface RpcResponse<T = any> {
+interface RpcResponse<T = unknown> {
   result?: T;
   error?: {
     code: number;
     message: string;
-    data?: any;
+    data?: unknown;
   };
   id?: string | number;
   jsonrpc: string;
@@ -277,7 +277,7 @@ export class ResilientRpcClient {
   /**
    * Wrapper for common Solana RPC methods with retry logic
    */
-  async getAccountInfo(publicKeyString: string): Promise<any> {
+  async getAccountInfo(publicKeyString: string): Promise<unknown> {
     return this.sendRpcRequestWithRetry({
       method: 'getAccountInfo',
       params: [publicKeyString, { encoding: 'base64' }]
@@ -292,7 +292,7 @@ export class ResilientRpcClient {
     return result.value;
   }
 
-  async getTokenAccountsByOwner(ownerPublicKey: string, mintPublicKey: string): Promise<any> {
+  async getTokenAccountsByOwner(ownerPublicKey: string, mintPublicKey: string): Promise<unknown> {
     return this.sendRpcRequestWithRetry({
       method: 'getTokenAccountsByOwner',
       params: [
@@ -303,14 +303,14 @@ export class ResilientRpcClient {
     });
   }
 
-  async getSignaturesForAddress(address: string, options?: any): Promise<any> {
+  async getSignaturesForAddress(address: string, options?: Record<string, unknown>): Promise<unknown> {
     return this.sendRpcRequestWithRetry({
       method: 'getSignaturesForAddress',
       params: [address, options || {}]
     });
   }
 
-  async getTransaction(signature: string, options?: any): Promise<any> {
+  async getTransaction(signature: string, options?: Record<string, unknown>): Promise<unknown> {
     return this.sendRpcRequestWithRetry({
       method: 'getTransaction',
       params: [signature, options || { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }]

@@ -13,7 +13,7 @@ import { ArrowLeft, Zap, TrendingUp, Shield, Clock } from 'lucide-react';
 import { useOptimizedProfileData } from '@/hooks/useOptimizedProfileData';
 
 export default function OptimizedProfilePage() {
-  useWallet();
+  const { connected, publicKey, disconnect } = useWallet();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const { transactions, isLoading } = useOptimizedProfileData();
@@ -22,7 +22,85 @@ export default function OptimizedProfilePage() {
     setMounted(true);
   }, []);
 
-  // Development mode for localhost:3003
+  // Enhanced wallet connection monitoring with automatic logout
+  useEffect(() => {
+    if (!mounted) return;
+
+    // Define logout helper function
+    const handleLogout = async (reason: string) => {
+      console.log(`🚨 Logging out user due to: ${reason}`);
+      try {
+        if (disconnect) await disconnect();
+      } catch (error) {
+        console.error('Error during logout:', error);
+      }
+      router.push('/');
+    };
+
+    // Immediate check - redirect if wallet not connected
+    if (!connected || !publicKey) {
+      console.log('🚨 Optimized profile page: No wallet connected, redirecting to home');
+      handleLogout('wallet disconnected');
+      return;
+    }
+
+    // Set up continuous monitoring for wallet connection
+    const checkWalletConnection = async () => {
+      if (!connected || !publicKey) {
+        console.log('🚨 Wallet connection lost during session, logging out user');
+        await handleLogout('wallet connection lost');
+        return false;
+      }
+      return true;
+    };
+
+    // Check wallet connection every 5 seconds
+    const connectionMonitor = setInterval(() => {
+      checkWalletConnection();
+    }, 5000);
+
+    // Check wallet provider status more frequently (support multiple wallets)
+    const walletStatusMonitor = setInterval(() => {
+      if (typeof window !== 'undefined') {
+        // Check multiple wallet providers
+        const phantomProvider = window.phantom?.solana;
+        const solflareProvider = window.solflare;
+        const solletProvider = window.sollet;
+        
+        // Find active provider (the one that matches current connection)
+        let activeProvider = null;
+        if (phantomProvider?.isConnected && phantomProvider?.publicKey) {
+          activeProvider = phantomProvider;
+        } else if (solflareProvider?.isConnected && solflareProvider?.publicKey) {
+          activeProvider = solflareProvider;
+        } else if (solletProvider?.isConnected && solletProvider?.publicKey) {
+          activeProvider = solletProvider;
+        }
+
+        if (activeProvider) {
+          // Check if wallet is still connected at the provider level
+          if (!activeProvider.isConnected) {
+            console.log('🚨 Wallet provider disconnected, logging out user');
+            handleLogout('provider disconnected');
+            return;
+          }
+          
+          // Check if public key matches (wallet might have switched accounts)
+          if (activeProvider.publicKey && publicKey && !activeProvider.publicKey.equals(publicKey)) {
+            console.log('🚨 Wallet account changed, logging out user for re-authentication');
+            handleLogout('wallet account changed');
+            return;
+          }
+        }
+      }
+    }, 3000);
+
+    // Cleanup intervals
+    return () => {
+      clearInterval(connectionMonitor);
+      clearInterval(walletStatusMonitor);
+    };
+  }, [connected, publicKey, disconnect, router, mounted]);
 
   if (!mounted) {
     return (

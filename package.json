@@ -31,7 +31,7 @@
     "@solana/wallet-adapter-react-ui": "^0.9.39",
     "@solana/wallet-adapter-wallets": "^0.19.37",
     "@solana/web3.js": "^1.98.4",
-    "@supabase/supabase-js": "^2.55.0",
+    "@supabase/supabase-js": "^2.57.2",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/pg": "^8.15.5",
     "@types/redis": "^4.0.10",

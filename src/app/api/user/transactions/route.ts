@@ -73,36 +73,10 @@ export async function GET(request: NextRequest) {
       console.log(`🎯 Serving cached transactions for ${walletAddress} (fromCache: ${cachedResult.fromCache})`);
       const responseData = cachedResult.data as PaginatedTransactions;
       
-      // If we got empty results from cache/database, try fallback
+      // If we got empty results from cache/database, return empty (no mainnet fallback)
       if (responseData.totalCount === 0) {
-        // Try real transactions API as fallback
-        const realTransactions = await fetchRealTransactions(walletAddress);
-        if (realTransactions !== null && realTransactions.length > 0) {
-          const totalCount = realTransactions.length;
-          const pageCount = Math.ceil(totalCount / limit);
-          const offset = (page - 1) * limit;
-          const paginatedTransactions = realTransactions.slice(offset, offset + limit);
-          
-          const fallbackData: PaginatedTransactions = {
-            transactions: paginatedTransactions,
-            totalCount,
-            pageCount,
-            currentPage: page,
-          };
-          
-          // Update cache with fallback data
-          await cacheLayer.invalidateUserCache(walletAddress, `transactions:${page}:${limit}`);
-          
-          const processingTime = Date.now() - startTime;
-          return NextResponse.json({ success: true, data: fallbackData, requestId }, {
-            headers: {
-              'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
-              'X-Processing-Time': `${processingTime}ms`,
-              'X-Request-ID': requestId,
-              'X-Cache-Status': 'FALLBACK'
-            },
-          });
-        }
+        console.log(`📋 Database is empty for ${walletAddress} - returning empty results (mainnet fallback disabled)`);
+        // Note: Mainnet fallback disabled to show only bot-generated transactions
         
         // Return empty data instead of mock transactions
         const responseData: PaginatedTransactions = {
@@ -138,17 +112,12 @@ export async function GET(request: NextRequest) {
       // Cache layer failed - fallback to original logic
       console.error(`❌ Cache layer failed for ${walletAddress}:`, cachedResult.error);
       
-      // Original fallback logic
+      // Original fallback logic (mainnet fallback disabled)
       let allTransactions = await fetchDatabaseTransactions(walletAddress);
       
-      if (allTransactions.length === 0) {
-        const realTransactions = await fetchRealTransactions(walletAddress);
-        if (realTransactions !== null && realTransactions.length > 0) {
-          allTransactions = realTransactions;
-        }
-      }
-
-      // Return empty data when no real transactions exist
+      console.log(`📋 Database query returned ${allTransactions.length} transactions for ${walletAddress} - no mainnet fallback`);
+      
+      // Return only database transactions (no mainnet fallback)
       if (allTransactions.length === 0) {
         allTransactions = [];
       }

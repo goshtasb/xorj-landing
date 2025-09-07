@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from ..database.service import get_database_service
 from ..core.config_secure import get_secure_settings
+from ..core.rpc_client import get_rpc_client
 
 logger = logging.getLogger(__name__)
 
@@ -37,30 +38,26 @@ class MainnetTraderDiscovery:
     
     def __init__(self):
         self.settings = None
-        self.http_client = None
+        self.rpc_client = None
         self.database_service = None
         
     async def initialize(self):
         """Initialize the trader discovery service"""
         self.settings = await get_secure_settings()
         self.database_service = await get_database_service()
+        self.rpc_client = await get_rpc_client()
         
-        self.http_client = httpx.AsyncClient(
-            timeout=30.0,
-            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20)
-        )
-        
-        logger.info("Mainnet trader discovery service initialized")
+        logger.info("Mainnet trader discovery service initialized with rate limiting")
     
     async def discover_top_traders(self, limit: int = 100) -> List[Dict[str, Any]]:
         """
         Discover top performing traders from recent mainnet activity
         """
         try:
-            if not self.http_client:
+            if not self.rpc_client:
                 await self.initialize()
             
-            logger.info(f"Discovering top {limit} traders from mainnet data")
+            logger.info(f"Discovering top {limit} traders from mainnet data using rate-limited client")
             
             # Get recent high-volume transactions from known DEXs
             top_traders = await self._analyze_dex_transactions(limit)
@@ -127,32 +124,25 @@ class MainnetTraderDiscovery:
             
             for program_id in dex_programs[:2]:  # Analyze top 2 DEXs to avoid rate limits
                 try:
-                    program_accounts = await self._get_program_accounts(program_id)
-                    for account in program_accounts[:50]:  # Sample recent accounts
-                        if "owner" in account:
-                            recent_traders.add(account["owner"])
+                    program_accounts = await self.rpc_client.get_program_accounts(program_id, limit=50)
+                    for account in program_accounts:  # Sample recent accounts
+                        if "account" in account and "owner" in account["account"]:
+                            recent_traders.add(account["account"]["owner"])
                 except Exception as e:
                     logger.debug(f"Error fetching accounts for program {program_id}: {e}")
                     continue
             
-            # Convert to list and add known high-performance addresses
+            # Convert to list - no hardcoded addresses, only discovered from live data
             trader_list = list(recent_traders)
             
-            # Add some known high-performing mainnet addresses for immediate results
-            known_performers = [
-                "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1",
-                "36c6VgswjHahVQrWvWkKZApW4GSmWy1VUcMHW1Kq7Vdr",
-                "CuieVDEDtLo7FypA9SbLM9saXFdb1dsshEkyErMqkRQq",
-                "8UviNr47S8eL6J3WfDxMRa3hvLta1VDJwNWqsDgtN3Cv",
-                "DCA265Vj8a9CEuX1eb1LWRnDT7uK6q1xMipnNyatn23M",
-                "jupoNjAxXgZ4rjzxzPMP4oxduvQsQtZzyknqvzYNrNu",
-                "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE",
-                "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-            ]
+            # Filter out common program addresses that aren't traders
+            filtered_traders = []
+            for addr in trader_list:
+                # Skip common program addresses and ensure valid wallet address format
+                if not addr.endswith("1111111111111112") and len(addr) == 44:  # Valid base58 length
+                    filtered_traders.append(addr)
             
-            trader_list.extend(known_performers)
-            
-            return [{"wallet_address": addr} for addr in trader_list[:limit]]
+            return [{"wallet_address": addr} for addr in filtered_traders[:limit]]
             
         except Exception as e:
             logger.error(f"Error analyzing DEX transactions: {e}")
@@ -200,7 +190,7 @@ class MainnetTraderDiscovery:
         """
         try:
             # Get recent transaction signatures for this wallet
-            signatures = await self._get_recent_signatures(wallet_address)
+            signatures = await self.rpc_client.get_signatures_for_address(wallet_address, limit=50)
             
             if len(signatures) < 10:  # Require minimum activity
                 return None
@@ -210,9 +200,9 @@ class MainnetTraderDiscovery:
             total_volume = 0.0
             profit_loss = 0.0
             
-            for sig in signatures[:50]:  # Analyze recent 50 transactions
+            for sig in signatures[:30]:  # Analyze recent 30 transactions (reduced to save rate limit)
                 try:
-                    tx_data = await self._get_transaction_details(sig)
+                    tx_data = await self.rpc_client.get_transaction(sig)
                     if tx_data and self._is_trading_transaction(tx_data):
                         trade_info = self._extract_trade_info(tx_data)
                         if trade_info:

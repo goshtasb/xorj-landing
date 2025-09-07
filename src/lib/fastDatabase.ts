@@ -13,8 +13,9 @@ const MAX_CACHE_SIZE = 1000;
 
 function getConnection(): Pool {
   if (!fastPool) {
+    // Use xorj_quant database for bot states and trader data
     const dbUrl = process.env.DATABASE_URL || 
-      'postgresql://aflatoongoshtasb@localhost:5432/xorj_development';
+      'postgresql://xorj:xorj_password@localhost:5432/xorj_quant';
     
     fastPool = new Pool({
       connectionString: dbUrl,

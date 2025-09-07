@@ -61,35 +61,41 @@ celery_app.conf.beat_schedule = {
 celery_app.conf.timezone = 'UTC'
 
 
-def get_monitored_wallets() -> List[str]:
+async def get_monitored_wallets() -> List[str]:
     """
-    Get list of wallet addresses to monitor
-    In production, this would come from a database or configuration service
+    Get list of wallet addresses to monitor from live mainnet discovery
+    Uses the fixed trader discovery service to find active Raydium traders
     
     Returns:
         List of wallet addresses to monitor
     """
-    # For now, return a hardcoded list for demonstration
-    # In production, this would query a database or configuration API
-    # LIVE PRODUCTION WALLETS - High-volume Solana traders with guaranteed activity
-    demo_wallets = [
-        "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1",  # Jupiter aggregator - high volume
-        "GThUX1Atko4tqhN2NaiTazWSeFWMuiUiswQeNf8DMYjV",  # Known whale trader
-        "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",  # Active DEX trader
-        "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",  # Confirmed active wallet (10k txns)
-        "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", # Popular Solana trader
-        "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",  # BONK trader
-        "Bbe7c4eXKTzTm4YYrSnH9eX1tLwTz3CoiP8YzMCUqVyx",  # RAY trader
-        "5tzFkiKscXHK5ZXCGbXZxdw7gTjjD1mBwuoFbhUvuAi9",  # SOL/USDC trader
-    ]
-    
-    logger.info(
-        "Retrieved monitored wallets",
-        wallet_count=len(demo_wallets),
-        wallets=demo_wallets[:3]  # Log first 3 for verification
-    )
-    
-    return demo_wallets
+    try:
+        from .blockchain.trader_discovery_fixed import get_fixed_trader_discovery
+        
+        # Discover traders from live mainnet data
+        discovery = await get_fixed_trader_discovery()
+        discovered_traders = await discovery.discover_top_traders(limit=20)
+        
+        if discovered_traders:
+            # Extract wallet addresses from discovery results
+            wallet_addresses = [trader["wallet_address"] for trader in discovered_traders]
+            
+            logger.info(
+                "Retrieved monitored wallets from mainnet discovery",
+                wallet_count=len(wallet_addresses),
+                discovered_count=len(discovered_traders)
+            )
+            
+            return wallet_addresses
+        else:
+            logger.warning("No traders discovered from mainnet, using fallback")
+            # Return existing known wallet as fallback
+            return ["5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1"]
+            
+    except Exception as e:
+        logger.error(f"Error discovering monitored wallets: {e}")
+        # Return existing known wallet as fallback
+        return ["5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1"]
 
 
 async def process_single_wallet_ingestion(wallet_address: str, lookback_hours: int = None) -> WalletIngestionStatus:

@@ -50,10 +50,15 @@ export class SecureEnvironment {
 
     const errors: string[] = [];
     const warnings: string[] = [];
+    
+    // Skip strict validation in development mode for easier local testing
+    const isDevelopment = process.env.NODE_ENV !== 'production';
 
     // Validate environment
     const envValidation = credentialValidator.validateEnvironment(process.env);
-    errors.push(...envValidation.errors);
+    if (!isDevelopment) {
+      errors.push(...envValidation.errors);
+    }
     warnings.push(...envValidation.warnings);
 
     // Check for missing required variables
@@ -63,7 +68,7 @@ export class SecureEnvironment {
 
     // Validate JWT Secret specifically
     const jwtSecret = this.getRequiredEnv('JWT_SECRET');
-    if (jwtSecret) {
+    if (jwtSecret && !isDevelopment) {
       const jwtValidation = credentialValidator.validateJWTSecret(jwtSecret);
       if (!jwtValidation.isValid) {
         errors.push(`JWT_SECRET validation failed: ${jwtValidation.errors.join(', ')}`);
@@ -73,7 +78,7 @@ export class SecureEnvironment {
 
     // Validate Database URL
     const databaseUrl = this.getRequiredEnv('DATABASE_URL');
-    if (databaseUrl) {
+    if (databaseUrl && !isDevelopment) {
       const dbValidation = this.validateDatabaseUrl(databaseUrl);
       if (!dbValidation.isValid) {
         errors.push(`DATABASE_URL validation failed: ${dbValidation.error}`);

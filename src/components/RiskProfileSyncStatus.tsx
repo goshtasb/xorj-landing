@@ -100,8 +100,15 @@ export function RiskProfileSyncStatus({
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch sync status';
-      setError(errorMessage);
-      console.error('❌ Risk profile sync status fetch failed:', errorMessage);
+      
+      // Handle service unavailable gracefully (trading bot not running)
+      if (errorMessage.includes('signal timed out') || errorMessage.includes('Failed to fetch')) {
+        setError('Trading bot service offline');
+        console.log('ℹ️ Trading bot service not available - this is expected in development');
+      } else {
+        setError(errorMessage);
+        console.error('❌ Risk profile sync status fetch failed:', errorMessage);
+      }
     } finally {
       setLoading(false);
     }

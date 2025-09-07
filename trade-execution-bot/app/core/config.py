@@ -43,8 +43,14 @@ class TradeExecutionConfig(BaseSettings):
         description="Connection string for user settings database"
     )
     user_settings_table: str = Field(
-        default="user_risk_profiles",
+        default="user_settings",
         env="USER_SETTINGS_TABLE"
+    )
+    
+    # Main Database for trades and transaction history
+    database_url: str = Field(
+        env="DATABASE_URL",
+        description="Connection string for main database (trades, transaction history)"
     )
     
     # Integration: Solana Network

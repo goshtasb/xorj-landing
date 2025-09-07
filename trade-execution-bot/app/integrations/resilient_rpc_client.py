@@ -47,13 +47,47 @@ class RpcMetrics:
     last_error: Optional[str] = None
     last_error_time: Optional[datetime] = None
 
+@dataclass
+class RpcEndpoint:
+    """RPC endpoint configuration"""
+    url: str
+    name: str
+    tier: str  # premium, public
+    client: Optional[AsyncClient] = None
+    failure_count: int = 0
+    last_failure: Optional[datetime] = None
+    circuit_open: bool = False
+    
+    def is_healthy(self) -> bool:
+        """Check if endpoint is healthy based on circuit breaker logic"""
+        if not self.circuit_open:
+            return True
+        
+        # Circuit breaker: reopen after 5 minutes
+        if self.last_failure and (datetime.now() - self.last_failure).total_seconds() > 300:
+            self.circuit_open = False
+            self.failure_count = 0
+            return True
+        
+        return False
+    
+    def record_failure(self):
+        """Record a failure and potentially open circuit"""
+        self.failure_count += 1
+        self.last_failure = datetime.now()
+        
+        # Open circuit after 3 consecutive failures
+        if self.failure_count >= 3:
+            self.circuit_open = True
+
 class ResilientRpcClient:
     """
-    Resilient RPC Client for Solana with exponential backoff and fallback support.
+    Advanced Resilient RPC Client with multiple endpoints and circuit breakers.
     
     Features:
+    - Multiple RPC endpoint support with automatic failover
+    - Circuit breaker pattern for failed endpoints
     - Exponential backoff retry mechanism
-    - Multiple RPC endpoint support (primary + fallback)
     - Rate limiting protection
     - Comprehensive error handling
     - Request/response logging
@@ -70,28 +104,63 @@ class ResilientRpcClient:
         max_delay_ms: int = 30000,
         timeout_seconds: int = 30
     ):
-        self.primary_rpc_url = primary_rpc_url
-        self.fallback_rpc_url = fallback_rpc_url
         self.commitment = commitment
         self.max_retries = max_retries
         self.initial_delay_ms = initial_delay_ms
         self.max_delay_ms = max_delay_ms
         self.timeout_seconds = timeout_seconds
         
-        # Initialize clients
-        self.primary_client = AsyncClient(primary_rpc_url, commitment=Commitment(commitment))
-        self.fallback_client = None
+        # Initialize endpoint pool with circuit breakers
+        self.endpoints: List[RpcEndpoint] = []
+        
+        # Add primary endpoint
+        self.endpoints.append(RpcEndpoint(
+            url=primary_rpc_url,
+            name="Primary",
+            tier="premium",
+            client=AsyncClient(primary_rpc_url, commitment=Commitment(commitment))
+        ))
+        
+        # Add fallback endpoint if provided
         if fallback_rpc_url:
-            self.fallback_client = AsyncClient(fallback_rpc_url, commitment=Commitment(commitment))
+            self.endpoints.append(RpcEndpoint(
+                url=fallback_rpc_url,
+                name="Fallback",
+                tier="public",
+                client=AsyncClient(fallback_rpc_url, commitment=Commitment(commitment))
+            ))
+        
+        # Add additional public endpoints for maximum resilience
+        public_endpoints = [
+            ("https://api.mainnet-beta.solana.com", "Solana Labs"),
+            ("https://rpc.ankr.com/solana", "Ankr Public"),
+            ("https://solana-mainnet.rpc.extrnode.com", "ExtrNode")
+        ]
+        
+        for url, name in public_endpoints:
+            # Don't duplicate existing endpoints
+            if not any(ep.url == url for ep in self.endpoints):
+                self.endpoints.append(RpcEndpoint(
+                    url=url,
+                    name=name,
+                    tier="public",
+                    client=AsyncClient(url, commitment=Commitment(commitment))
+                ))
+        
+        # Legacy properties for compatibility
+        self.primary_rpc_url = primary_rpc_url
+        self.fallback_rpc_url = fallback_rpc_url
+        self.primary_client = self.endpoints[0].client
+        self.fallback_client = self.endpoints[1].client if len(self.endpoints) > 1 else None
         
         # Metrics and state
         self.metrics = RpcMetrics()
         self.request_id_counter = 0
         
         logger.info(
-            "Resilient RPC client initialized",
+            "Advanced resilient RPC client initialized",
             primary_url=primary_rpc_url[:50] + "..." if len(primary_rpc_url) > 50 else primary_rpc_url,
-            has_fallback=fallback_rpc_url is not None,
+            total_endpoints=len(self.endpoints),
             max_retries=max_retries,
             commitment=commitment
         )
@@ -246,10 +315,103 @@ class ResilientRpcClient:
         elif method == "getTokenAccountsByOwner":
             if len(params) >= 2:
                 owner = Pubkey.from_string(params[0]) if isinstance(params[0], str) else params[0]
-                mint_filter = params[1] if isinstance(params[1], dict) else {"mint": params[1]}
-                encoding = params[2] if len(params) > 2 else {"encoding": "jsonParsed"}
-                response = await client.get_token_accounts_by_owner(owner, mint_filter, encoding=encoding.get("encoding", "jsonParsed"))
-                return {"value": response.value}
+                
+                # Debug logging to understand the issue
+                logger.debug("getTokenAccountsByOwner params debug", 
+                           params_length=len(params),
+                           param_0_type=type(params[0]).__name__,
+                           param_1_type=type(params[1]).__name__,
+                           param_1_value=str(params[1])[:100] if isinstance(params[1], str) else repr(params[1]))
+                
+                # Handle both mint and program filters
+                filter_param = params[1]
+                if isinstance(filter_param, str):
+                    # If it's a string, determine if it's a mint or program ID
+                    # SPL Token program ID: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA
+                    if filter_param == "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA":
+                        # It's a program filter
+                        filter_obj = {"programId": Pubkey.from_string(filter_param)}
+                    else:
+                        # It's a mint filter 
+                        filter_obj = {"mint": Pubkey.from_string(filter_param)}
+                elif isinstance(filter_param, dict):
+                    # Convert string values to Pubkey objects and handle special cases
+                    filter_obj = {}
+                    for key, value in filter_param.items():
+                        if isinstance(value, str):
+                            # Check if this mint is actually a program ID that should be converted
+                            if key == "mint" and value == "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA":
+                                # Convert to programId filter
+                                filter_obj = {"programId": Pubkey.from_string(value)}
+                                break
+                            else:
+                                filter_obj[key] = Pubkey.from_string(value)
+                        else:
+                            filter_obj[key] = value
+                else:
+                    filter_obj = {"mint": filter_param}
+                
+                logger.debug("getTokenAccountsByOwner filter debug", 
+                           filter_obj_type=type(filter_obj).__name__,
+                           filter_obj_keys=list(filter_obj.keys()) if isinstance(filter_obj, dict) else "not_dict",
+                           filter_obj_values=[type(v).__name__ for v in filter_obj.values()] if isinstance(filter_obj, dict) else "not_dict")
+                
+                # AsyncClient.get_token_accounts_by_owner() doesn't accept encoding parameter
+                # It uses jsonParsed by default
+                try:
+                    # The Solana library has issues with TokenAccountOpts structure
+                    # Let's bypass it and use raw RPC call format directly
+                    import httpx
+                    
+                    # Construct the raw JSON RPC request payload
+                    if "programId" in filter_obj:
+                        filter_param = {"programId": str(filter_obj["programId"])}
+                    else:
+                        filter_param = {"mint": str(filter_obj["mint"])}
+                    
+                    logger.debug("Using raw RPC call to bypass library issue",
+                               filter_param=filter_param,
+                               owner_str=str(owner))
+                    
+                    # Make raw HTTP request to RPC endpoint
+                    async with httpx.AsyncClient() as http_client:
+                        payload = {
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "getTokenAccountsByOwner",
+                            "params": [
+                                str(owner),
+                                filter_param,
+                                {
+                                    "encoding": "jsonParsed",
+                                    "commitment": "confirmed"
+                                }
+                            ]
+                        }
+                        
+                        # Use the primary RPC URL from the resilient client instance
+                        rpc_url = self.primary_rpc_url
+                        response = await http_client.post(
+                            rpc_url,
+                            json=payload,
+                            headers={'Content-Type': 'application/json'},
+                            timeout=30.0
+                        )
+                        response.raise_for_status()
+                        
+                        result = response.json()
+                        if "error" in result:
+                            raise Exception(f"RPC error: {result['error']}")
+                        
+                        return result["result"]
+                        
+                except Exception as e:
+                    logger.error("getTokenAccountsByOwner execution error",
+                               error=str(e),
+                               error_type=type(e).__name__,
+                               owner_type=type(owner).__name__,
+                               filter_obj_repr=repr(filter_obj))
+                    raise
             
         elif method == "getSignaturesForAddress":
             if len(params) >= 1:
@@ -286,7 +448,9 @@ class ResilientRpcClient:
                 
         else:
             # Fallback to raw HTTP request for unsupported methods
-            return await self._send_raw_rpc_request(client.get_rpc_endpoint(), request)
+            # Get RPC URL from our stored endpoint instead of client method
+            rpc_url = self.primary_rpc_url  # Use the stored URL
+            return await self._send_raw_rpc_request(rpc_url, request)
 
     async def _send_raw_rpc_request(self, rpc_url: str, request: RpcRequest) -> Any:
         """
@@ -405,12 +569,92 @@ class ResilientRpcClient:
         return result["value"] if isinstance(result, dict) else result
 
     async def get_token_accounts_by_owner(self, owner: str, mint: str) -> Any:
-        """Get token accounts with retry logic"""
-        request = RpcRequest(
-            method="getTokenAccountsByOwner",
-            params=[owner, {"mint": mint}, {"encoding": "jsonParsed"}]
-        )
-        return await self.send_rpc_request_with_retry(request)
+        """Get token accounts with retry logic - uses Helius V2 for mega-wallets"""
+        try:
+            # First try the standard method
+            request = RpcRequest(
+                method="getTokenAccountsByOwner",
+                params=[owner, {"mint": mint}]
+            )
+            return await self.send_rpc_request_with_retry(request)
+        except Exception as e:
+            error_msg = str(e)
+            # If it's a mega-wallet error, try getTokenAccountsByOwnerV2
+            if "Request deprioritized due to number of accounts requested" in error_msg or "getTokenAccountsByOwnerV2" in error_msg:
+                logger.info("Standard method failed for mega-wallet, trying getTokenAccountsByOwnerV2", owner=owner[:12] + "...")
+                return await self.get_token_accounts_by_owner_v2(owner, mint)
+            else:
+                raise
+    
+    async def get_token_accounts_by_owner_v2(self, owner: str, mint: str, limit: int = 1000) -> Any:
+        """Get token accounts with Helius V2 pagination for mega-wallets"""
+        all_accounts = []
+        cursor = None
+        page = 1
+        
+        logger.info("Using Helius V2 paginated method for mega-wallet", owner=owner[:12] + "...", limit=limit)
+        
+        while True:
+            try:
+                # Build V2 request parameters
+                # Check if 'mint' is actually the SPL Token program ID and use programId filter
+                if mint == "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA":
+                    filter_param = {"programId": mint}
+                else:
+                    filter_param = {"mint": mint}
+                
+                params = [
+                    owner,
+                    filter_param,
+                    {
+                        "encoding": "jsonParsed",
+                        "limit": limit
+                    }
+                ]
+                
+                # Add cursor for pagination
+                if cursor:
+                    params[2]["cursor"] = cursor
+                
+                request = RpcRequest(
+                    method="getTokenAccountsByOwnerV2",
+                    params=params
+                )
+                
+                logger.debug("Fetching token accounts page", page=page, cursor=cursor, owner=owner[:12] + "...")
+                response = await self.send_rpc_request_with_retry(request)
+                
+                if not response or not response.get("value"):
+                    break
+                    
+                accounts = response["value"]
+                all_accounts.extend(accounts)
+                
+                logger.info(f"Retrieved {len(accounts)} accounts on page {page} (total: {len(all_accounts)})", 
+                          owner=owner[:12] + "...")
+                
+                # Check if we have more pages
+                cursor = response.get("cursor")
+                if not cursor:
+                    break
+                    
+                page += 1
+                
+                # Add small delay between requests to be respectful
+                await asyncio.sleep(0.1)
+                
+            except Exception as e:
+                logger.error("Error in getTokenAccountsByOwnerV2 pagination", 
+                           page=page, error=str(e), owner=owner[:12] + "...")
+                raise
+        
+        logger.info(f"Completed V2 pagination - total accounts: {len(all_accounts)}", owner=owner[:12] + "...")
+        
+        # Return in the same format as regular method
+        return {
+            "context": {"slot": 0},
+            "value": all_accounts
+        }
 
     async def get_signatures_for_address(self, address: str, limit: int = 1000) -> Any:
         """Get transaction signatures with retry logic"""
@@ -458,26 +702,84 @@ class ResilientRpcClient:
 # Factory function to create resilient RPC client with environment configuration
 def create_resilient_rpc_client() -> ResilientRpcClient:
     """
-    Create resilient RPC client with environment-based configuration.
-    Uses Helius as primary endpoint and public RPC as fallback.
+    Create resilient RPC client with multiple backup endpoints.
+    Priority: Helius Premium -> QuickNode -> Alchemy -> Public RPCs
     """
-    # Get Helius API key from environment
+    # Get API keys from environment
     helius_api_key = os.getenv("HELIUS_API_KEY")
+    quicknode_endpoint = os.getenv("QUICKNODE_RPC_URL")
+    alchemy_api_key = os.getenv("ALCHEMY_API_KEY")
     
-    # Configure primary RPC URL (prefer Helius if available)
+    # Build RPC endpoint list in priority order
+    rpc_endpoints = []
+    
+    # 1. Helius Premium (best for complex queries)
     if helius_api_key:
-        primary_rpc_url = f"https://mainnet.helius-rpc.com/?api-key={helius_api_key}"
-        logger.info("Using Helius as primary RPC endpoint")
-    else:
-        primary_rpc_url = "https://api.mainnet-beta.solana.com"
-        logger.warning("HELIUS_API_KEY not found, using public RPC as primary (may hit rate limits)")
+        rpc_endpoints.append({
+            "url": f"https://mainnet.helius-rpc.com/?api-key={helius_api_key}",
+            "name": "Helius Premium",
+            "tier": "premium"
+        })
+        logger.info("Added Helius Premium RPC endpoint")
     
-    # Configure fallback RPC URL
-    fallback_rpc_url = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+    # 2. QuickNode (reliable premium)
+    if quicknode_endpoint:
+        rpc_endpoints.append({
+            "url": quicknode_endpoint,
+            "name": "QuickNode",
+            "tier": "premium"
+        })
+        logger.info("Added QuickNode RPC endpoint")
     
-    # Don't use the same URL for both primary and fallback
-    if primary_rpc_url == fallback_rpc_url:
-        fallback_rpc_url = None
+    # 3. Alchemy (good for standard queries)
+    if alchemy_api_key:
+        rpc_endpoints.append({
+            "url": f"https://solana-mainnet.g.alchemy.com/v2/{alchemy_api_key}",
+            "name": "Alchemy",
+            "tier": "premium"
+        })
+        logger.info("Added Alchemy RPC endpoint")
+    
+    # 4. Free public endpoints (backup)
+    public_endpoints = [
+        {
+            "url": "https://api.mainnet-beta.solana.com",
+            "name": "Solana Labs Public",
+            "tier": "public"
+        },
+        {
+            "url": "https://solana-api.projectserum.com",
+            "name": "Project Serum",
+            "tier": "public"
+        },
+        {
+            "url": "https://rpc.ankr.com/solana",
+            "name": "Ankr Public",
+            "tier": "public"
+        },
+        {
+            "url": "https://solana-mainnet.rpc.extrnode.com",
+            "name": "ExtrNode",
+            "tier": "public"
+        }
+    ]
+    
+    rpc_endpoints.extend(public_endpoints)
+    
+    if not rpc_endpoints:
+        logger.error("No RPC endpoints configured! Add at least HELIUS_API_KEY")
+        raise ValueError("No RPC endpoints available")
+    
+    # Use first endpoint as primary, second as fallback
+    primary_rpc_url = rpc_endpoints[0]["url"]
+    fallback_rpc_url = rpc_endpoints[1]["url"] if len(rpc_endpoints) > 1 else None
+    
+    logger.info(
+        "RPC client configured with multiple endpoints",
+        primary=rpc_endpoints[0]["name"],
+        fallback=rpc_endpoints[1]["name"] if len(rpc_endpoints) > 1 else "none",
+        total_endpoints=len(rpc_endpoints)
+    )
     
     return ResilientRpcClient(
         primary_rpc_url=primary_rpc_url,

@@ -31,7 +31,7 @@ class DatabaseClient:
     async def store_raw_transactions(self, job_id: str, wallet_address: str, transactions: List[Dict[str, Any]]) -> int:
         """
         Store raw transaction data from Helius API into raw_transactions table
-        FR-4: Database Persistence
+        FR-4: Database Persistence - Optimized bulk insert version
         
         Args:
             job_id: UUID of the fetch job
@@ -45,30 +45,27 @@ class DatabaseClient:
             logger.info("No transactions to store")
             return 0
         
-        logger.info("Storing raw transactions to database",
+        logger.info("Storing raw transactions to database (bulk insert)",
                    job_id=job_id,
                    wallet_address=wallet_address[:10] + "...",
                    transaction_count=len(transactions))
         
-        stored_count = 0
-        
-        for transaction in transactions:
-            try:
-                await self._store_single_transaction(job_id, wallet_address, transaction)
-                stored_count += 1
-            except Exception as e:
-                logger.warning("Failed to store transaction",
-                             signature=transaction.get('signature', 'unknown')[:10] + "...",
-                             error=str(e))
-                # Continue with other transactions even if one fails
-                continue
-        
-        logger.info("Raw transactions stored successfully",
-                   job_id=job_id,
-                   stored_count=stored_count,
-                   total_count=len(transactions))
-        
-        return stored_count
+        try:
+            # Use bulk insert for much better performance
+            stored_count = await self._store_bulk_transactions(job_id, wallet_address, transactions)
+            
+            logger.info("Raw transactions stored successfully",
+                       job_id=job_id,
+                       stored_count=stored_count,
+                       total_count=len(transactions))
+            
+            return stored_count
+            
+        except Exception as e:
+            logger.error("Bulk transaction storage failed",
+                        job_id=job_id,
+                        error=str(e))
+            return 0
     
     async def _store_single_transaction(self, job_id: str, wallet_address: str, transaction: Dict[str, Any]):
         """Store a single transaction record"""
@@ -162,6 +159,78 @@ class DatabaseClient:
         except Exception as e:
             logger.error("Error getting job transaction count", error=str(e))
             return 0
+
+    async def _store_bulk_transactions(self, job_id: str, wallet_address: str, transactions: List[Dict[str, Any]]) -> int:
+        """
+        Optimized bulk insert for thousands of transactions
+        Uses single psql call with multi-row VALUES clause
+        """
+        if not transactions:
+            return 0
+        
+        logger.info("Starting bulk transaction insert",
+                   transaction_count=len(transactions))
+        
+        # Build bulk INSERT statement with VALUES clause
+        base_sql = """
+        INSERT INTO raw_transactions (job_id, wallet_address, signature, block_time, raw_transaction_data)
+        VALUES """
+        
+        values_parts = []
+        for transaction in transactions:
+            signature = transaction.get('signature', '')
+            block_time = transaction.get('blockTime', 0)
+            raw_data = json.dumps(transaction).replace("'", "''")  # Escape single quotes
+            
+            if signature:  # Only process transactions with signatures
+                value_clause = f"('{job_id}', '{wallet_address}', '{signature}', {block_time}, '{raw_data}'::jsonb)"
+                values_parts.append(value_clause)
+        
+        if not values_parts:
+            logger.warning("No valid transactions to store (missing signatures)")
+            return 0
+        
+        # Build final SQL with ON CONFLICT clause
+        full_sql = base_sql + ",\n    ".join(values_parts) + "\nON CONFLICT (signature) DO NOTHING;"
+        
+        # Execute single bulk insert
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.sql', delete=False) as f:
+                f.write(full_sql)
+                temp_file = f.name
+            
+            logger.info("Executing bulk insert",
+                       values_count=len(values_parts))
+            
+            result = subprocess.run([
+                'psql', 
+                '-h', 'localhost',
+                '-U', 'xorj',
+                '-d', 'xorj_quant',
+                '-f', temp_file
+            ], 
+            env={**os.environ, 'PGPASSWORD': ''},
+            capture_output=True, 
+            text=True, 
+            timeout=300)  # Increased timeout for bulk operation
+            
+            if result.returncode != 0:
+                logger.error("Bulk insert failed",
+                           error=result.stderr,
+                           sql_length=len(full_sql))
+                raise Exception(f"Bulk insert failed: {result.stderr}")
+            
+            logger.info("Bulk insert completed successfully",
+                       processed_count=len(values_parts))
+            
+            return len(values_parts)
+            
+        finally:
+            # Clean up temporary file
+            try:
+                os.unlink(temp_file)
+            except OSError:
+                pass
 
 
 # Global database client instance

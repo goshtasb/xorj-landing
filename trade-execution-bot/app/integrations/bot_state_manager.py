@@ -201,7 +201,7 @@ class BotStateManager:
             configuration = {
                 "risk_profile": "moderate",
                 "slippage_tolerance": 1.0,
-                "max_trade_amount": 10000
+                "max_trade_amount": 10  # Default to $10 to match user setting
             }
         
         try:

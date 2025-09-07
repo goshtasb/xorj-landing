@@ -167,24 +167,19 @@ class UserSettingsClient:
         
         start_time = asyncio.get_event_loop().time()
         
-        # Prepared query with security considerations
+        # Prepared query with security considerations - adapted to actual user_settings table schema
         query = f"""
             SELECT 
-                user_id,
+                id as user_id,
                 wallet_address,
                 risk_profile,
-                max_position_size_sol,
-                max_daily_trades,
-                auto_trading_enabled,
-                vault_address,
-                last_updated
+                settings,
+                updated_at as last_updated
             FROM {self.table_name}
-            WHERE auto_trading_enabled = TRUE
-                AND wallet_address IS NOT NULL
+            WHERE wallet_address IS NOT NULL
                 AND wallet_address != ''
-                AND max_position_size_sol > 0
-                AND max_daily_trades > 0
-            ORDER BY last_updated DESC
+                AND risk_profile IS NOT NULL
+            ORDER BY updated_at DESC
         """
         
         logger.info("Querying active user profiles", table_name=self.table_name)
@@ -258,14 +253,28 @@ class UserSettingsClient:
             risk_profile_str = row['risk_profile'].lower()
             risk_profile = RiskProfile(risk_profile_str)
             
+            # Parse settings JSON to extract trading configuration
+            settings = row.get('settings', {})
+            if isinstance(settings, str):
+                import json
+                settings = json.loads(settings)
+            elif settings is None:
+                settings = {}
+            
+            # Extract trading configuration from settings with sensible defaults
+            investment_amount = settings.get('investmentAmount', 100)  # Default 100 SOL
+            max_daily_trades = settings.get('maxDailyTrades', 10)  # Default 10 trades per day
+            auto_trading_enabled = settings.get('autoTradingEnabled', True)  # Default enabled
+            vault_address = settings.get('vaultAddress')
+            
             return UserRiskProfile(
                 user_id=str(row['user_id']),
                 wallet_address=str(row['wallet_address']),
                 risk_profile=risk_profile,
-                max_position_size_sol=Decimal(str(row['max_position_size_sol'])),
-                max_daily_trades=int(row['max_daily_trades']),
-                auto_trading_enabled=bool(row['auto_trading_enabled']),
-                vault_address=str(row['vault_address']) if row['vault_address'] else None,
+                max_position_size_sol=Decimal(str(investment_amount)),
+                max_daily_trades=int(max_daily_trades),
+                auto_trading_enabled=bool(auto_trading_enabled),
+                vault_address=str(vault_address) if vault_address else None,
                 last_updated=row['last_updated']
             )
             
@@ -295,17 +304,13 @@ class UserSettingsClient:
         
         query = f"""
             SELECT 
-                user_id,
+                id as user_id,
                 wallet_address,
                 risk_profile,
-                max_position_size_sol,
-                max_daily_trades,
-                auto_trading_enabled,
-                vault_address,
-                last_updated
+                settings,
+                updated_at as last_updated
             FROM {self.table_name}
             WHERE wallet_address = $1
-                AND auto_trading_enabled = TRUE
         """
         
         try:

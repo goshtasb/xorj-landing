@@ -135,7 +135,7 @@ class SystemOrchestrator:
         # Initialize core components (FR-1 through FR-4) - will be properly initialized in async initialize()
         self.strategy_selector = get_strategy_selector()  # FR-1: Strategy Ingestion (sync)
         self.solana_client = None                         # FR-2: Portfolio Reading (async - initialized later)
-        self.trade_generator = get_trade_generator()      # FR-3: Trade Generation (sync)
+        self.trade_generator = None                       # FR-3: Trade Generation (async - initialized later)
         self.trade_executor = None                        # FR-4: Trade Execution (async - initialized later)
         
         # System state (reset on each cycle)
@@ -172,6 +172,7 @@ class SystemOrchestrator:
             # Initialize async components that weren't initialized in constructor
             self.solana_client = await get_solana_client()  # Now properly await the async getter
             self.trade_executor = await get_trade_executor()  # Now properly await the async getter
+            self.trade_generator = await get_trade_generator()  # Initialize trade generator properly
             
             # Initialize Solana client for blockchain interactions
             if not await self.solana_client.initialize():
@@ -182,8 +183,6 @@ class SystemOrchestrator:
                 )
                 return False
             
-            # Initialize trade generator async components
-            await self.trade_generator.initialize()
             
             # Validate production configuration if in production
             if self.config.is_production:
@@ -1011,10 +1010,9 @@ class SystemOrchestrator:
                     user_risk_profile=target_portfolio.user_risk_profile.value
                 )
                 
-                # For this implementation, we'll use the trader's wallet as vault address for testing
-                # In production, this would be a proper program-derived address (PDA)
-                vault_address = target_portfolio.trader_wallet_address
-                user_id = f"user_{target_portfolio.trader_wallet_address[:8]}"
+                # Use the actual user's vault address and user ID instead of trader's wallet
+                vault_address = target_portfolio.user_vault_address
+                user_id = target_portfolio.user_id
                 
                 current_portfolio = await self.solana_client.read_vault_holdings(
                     vault_address=vault_address,

@@ -44,7 +44,7 @@ export const normalizeRiskProfile = (profile?: string): RiskProfile => {
 
 // Shared database connection cache
 let sharedDbPool: Pool | null = null;
-let sharedDrizzleDb: any = null;
+let sharedDrizzleDb: unknown = null;
 
 /**
  * Get or create a shared database connection

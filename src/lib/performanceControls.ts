@@ -4,7 +4,7 @@
  */
 
 interface RequestCache {
-  data: any;
+  data: unknown;
   timestamp: number;
   ttl: number;
 }
@@ -20,7 +20,7 @@ class PerformanceController {
   private activeRequests = new Set<string>();
 
   // Cache management
-  getCachedData(key: string): any | null {
+  getCachedData(key: string): unknown | null {
     const cached = this.cache.get(key);
     if (cached && Date.now() - cached.timestamp < cached.ttl) {
       return cached.data;
@@ -29,7 +29,7 @@ class PerformanceController {
     return null;
   }
 
-  setCachedData(key: string, data: any, ttl = 30000): void {
+  setCachedData(key: string, data: unknown, ttl = 30000): void {
     this.cache.set(key, { data, timestamp: Date.now(), ttl });
   }
 
@@ -65,7 +65,7 @@ class PerformanceController {
   }
 
   // Smart API wrapper
-  async smartFetch(url: string, options: RequestInit = {}, cacheKey?: string, ttl = 30000): Promise<any> {
+  async smartFetch(url: string, options: RequestInit = {}, cacheKey?: string, ttl = 30000): Promise<unknown> {
     const key = cacheKey || url;
     
     // Check cache first
@@ -126,7 +126,7 @@ class PerformanceController {
   }
 
   // Optimized useEffect dependency tracker
-  createStableDeps(deps: any[]): string {
+  createStableDeps(deps: unknown[]): string {
     return JSON.stringify(deps.map(dep => typeof dep === 'function' ? dep.name : dep));
   }
 
@@ -152,6 +152,6 @@ export function usePerformantAPI() {
 }
 
 // Utility for creating stable dependencies
-export function useStableDeps(deps: any[]): string {
+export function useStableDeps(deps: unknown[]): string {
   return performanceController.createStableDeps(deps);
 }

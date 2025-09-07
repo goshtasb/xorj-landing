@@ -186,6 +186,166 @@ class DataIngestionWorker:
         
         return all_signatures
     
+    async def estimate_transaction_count(
+        self,
+        wallet_address: str,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> int:
+        """
+        Pre-flight check to estimate transaction count without fetching all data
+        
+        Args:
+            wallet_address: Wallet address to check
+            start_date: Start date for estimation (optional)
+            end_date: End date for estimation (optional)
+            
+        Returns:
+            Estimated transaction count
+        """
+        try:
+            # Use a small sample to estimate total volume
+            sample_signatures = await self.retry_session.execute_with_retry(
+                self.solana_client.get_transaction_signatures,
+                wallet_address,
+                limit=100  # Small sample for estimation
+            )
+            
+            if not sample_signatures or len(sample_signatures) < 2:
+                return 0
+            
+            # Get timestamps from first and last signatures in sample
+            first_timestamp = getattr(sample_signatures[0], 'block_time', None)
+            last_timestamp = getattr(sample_signatures[-1], 'block_time', None)
+            
+            if not first_timestamp or not last_timestamp:
+                return len(sample_signatures)
+            
+            # Calculate time span in the sample
+            sample_time_span = first_timestamp - last_timestamp  # in seconds
+            if sample_time_span <= 0:
+                return len(sample_signatures)
+            
+            # Calculate target time span (90 days if no dates provided)
+            if not start_date or not end_date:
+                target_time_span = 90 * 24 * 3600  # 90 days in seconds
+            else:
+                target_time_span = int((end_date - start_date).total_seconds())
+            
+            # Estimate total transactions based on sample rate
+            transactions_per_second = len(sample_signatures) / sample_time_span
+            estimated_total = int(transactions_per_second * target_time_span)
+            
+            logger.info(
+                "Transaction count estimation",
+                wallet=wallet_address,
+                sample_size=len(sample_signatures),
+                sample_time_span=sample_time_span,
+                transactions_per_second=transactions_per_second,
+                estimated_total=estimated_total
+            )
+            
+            return estimated_total
+            
+        except Exception as e:
+            logger.error(
+                "Failed to estimate transaction count",
+                wallet=wallet_address,
+                error=str(e)
+            )
+            # Conservative estimate - assume high volume
+            return settings.transaction_threshold + 1
+    
+    async def execute_sampling_backfill(
+        self,
+        wallet_address: str,
+        start_date: datetime,
+        end_date: datetime
+    ) -> Tuple[List[Dict[str, any]], List[str]]:
+        """
+        Execute sampling backfill strategy for high-volume wallets
+        
+        Args:
+            wallet_address: Wallet address to sample
+            start_date: Start date for sampling
+            end_date: End date for sampling
+            
+        Returns:
+            Tuple of (sampled_signatures, errors)
+        """
+        all_sampled_signatures = []
+        errors = []
+        
+        logger.info(
+            "Starting sampling backfill",
+            wallet=wallet_address,
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat(),
+            samples_per_day=settings.num_samples_per_day
+        )
+        
+        # Loop through each day in the range
+        current_date = start_date.date()
+        end_date_only = end_date.date()
+        
+        while current_date <= end_date_only:
+            try:
+                # Create datetime objects for start and end of day
+                day_start = datetime.combine(current_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+                day_end = datetime.combine(current_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+                
+                # Fetch sample transactions for this day
+                # Note: Due to API limitations, we'll sample recent transactions and filter by date
+                try:
+                    day_signatures = await self.retry_session.execute_with_retry(
+                        self.solana_client.get_transaction_signatures,
+                        wallet_address,
+                        limit=settings.num_samples_per_day * 4  # Get more to have options for filtering
+                    )
+                    
+                    # Filter for transactions actually within this day and take samples
+                    day_filtered = []
+                    for sig in day_signatures or []:
+                        sig_time = getattr(sig, 'block_time', None)
+                        if sig_time:
+                            sig_date = datetime.fromtimestamp(sig_time, timezone.utc)
+                            if day_start <= sig_date <= day_end:
+                                day_filtered.append(sig)
+                                # Take limited samples per day
+                                if len(day_filtered) >= settings.num_samples_per_day:
+                                    break
+                    
+                    all_sampled_signatures.extend(day_filtered)
+                    
+                    # Log sampling for this day
+                    if day_filtered:
+                        logger.debug(
+                            "Sampled transactions for day",
+                            wallet=wallet_address,
+                            date=current_date.isoformat(),
+                            samples=len(day_filtered)
+                        )
+                    
+                except Exception as e:
+                    errors.append(f"Failed to fetch samples for {current_date}: {str(e)}")
+                
+                # Move to next day
+                current_date += timedelta(days=1)
+                
+            except Exception as e:
+                errors.append(f"Failed to process day {current_date}: {str(e)}")
+                current_date += timedelta(days=1)
+                continue
+        
+        logger.info(
+            "Completed sampling backfill",
+            wallet=wallet_address,
+            total_samples=len(all_sampled_signatures),
+            errors=len(errors)
+        )
+        
+        return all_sampled_signatures, errors
+    
     async def fetch_and_parse_transactions(
         self,
         wallet_address: str,
@@ -298,10 +458,41 @@ class DataIngestionWorker:
                         end_date=end_date.isoformat() if end_date else None
                     )
                     
-                    # Step 1: Fetch transaction signatures
-                    signatures = await self.fetch_wallet_signatures(
+                    # Step 1: Pre-flight transaction count check
+                    estimated_count = await self.estimate_transaction_count(
                         wallet_address, start_date, end_date
                     )
+                    
+                    ingestion_method = "FULL"
+                    
+                    # Step 2: Conditional logic based on transaction threshold
+                    if estimated_count > settings.transaction_threshold:
+                        logger.info(
+                            "High-volume wallet detected, using sampling strategy",
+                            wallet=wallet_address,
+                            estimated_count=estimated_count,
+                            threshold=settings.transaction_threshold
+                        )
+                        
+                        # Execute sampling backfill for high-volume wallets
+                        signatures, errors = await self.execute_sampling_backfill(
+                            wallet_address, start_date, end_date
+                        )
+                        ingestion_method = "SAMPLED"
+                    else:
+                        logger.info(
+                            "Low-volume wallet detected, using full backfill",
+                            wallet=wallet_address,
+                            estimated_count=estimated_count,
+                            threshold=settings.transaction_threshold
+                        )
+                        
+                        # Execute full backfill for low-volume wallets
+                        signatures = await self.fetch_wallet_signatures(
+                            wallet_address, start_date, end_date
+                        )
+                        errors = []
+                        ingestion_method = "FULL"
                     
                     status.total_transactions_found = len(signatures)
                     
@@ -310,14 +501,22 @@ class DataIngestionWorker:
                         status.mark_completed(success=True)
                         return status
                     
-                    # Step 2: Filter for potential Raydium transactions
+                    # Step 3: Filter for potential Raydium transactions
                     # For now, we'll process all signatures and let the parser filter
                     status.raydium_transactions_found = len(signatures)
                     
-                    # Step 3: Fetch and parse transactions
-                    parsed_swaps, errors = await self.fetch_and_parse_transactions(
-                        wallet_address, signatures
-                    )
+                    # Step 4: Fetch and parse transactions (if not already done in sampling)
+                    if ingestion_method == "SAMPLED":
+                        # Signatures are already fetched, now parse them
+                        parsed_swaps, parse_errors = await self.fetch_and_parse_transactions(
+                            wallet_address, signatures
+                        )
+                        errors.extend(parse_errors)
+                    else:
+                        # Full backfill - fetch and parse transactions
+                        parsed_swaps, errors = await self.fetch_and_parse_transactions(
+                            wallet_address, signatures
+                        )
                     
                     status.valid_swaps_extracted = len(parsed_swaps)
                     status.invalid_transactions = len(signatures) - len(parsed_swaps)
@@ -456,8 +655,8 @@ class DataIngestionWorker:
         if lookback_hours is None:
             lookback_hours = settings.ingestion_schedule_hours
         
-        # Calculate date range
-        end_date = datetime.utcnow()
+        # Calculate date range (timezone-aware to match signature timestamps)
+        end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(hours=lookback_hours)
         
         # Create ingestion batch

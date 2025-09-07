@@ -3,8 +3,9 @@ XORJ Quantitative Engine - Main Application Entry Point
 FastAPI application with health checks and basic API endpoints
 """
 
+import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 import uvicorn
 
@@ -15,10 +16,11 @@ from pydantic import BaseModel
 
 from .core.config import get_settings
 from .core.logging import get_api_logger, CorrelationContext
-from .ingestion.worker import get_ingestion_worker, run_ingestion_for_wallets
+from .ingestion.worker import get_ingestion_worker, run_ingestion_for_wallets, DataIngestionWorker
 from .ingestion.solana_client import get_helius_client, close_all_clients
 from .calculation.service import get_calculation_service, close_calculation_service
 from .scoring.service import get_scoring_service, close_scoring_service
+from .blockchain.trader_discovery import MainnetTraderDiscovery, get_trader_discovery
 from .worker import process_wallet_batch
 
 settings = get_settings()
@@ -142,6 +144,106 @@ class RankedTradersResponse(BaseModel):
     meta: Dict[str, Any]
 
 
+# Background task management
+background_discovery_task = None
+discovery_running = False
+
+
+async def background_trader_discovery():
+    """
+    Background task that continuously discovers new traders and analyzes them
+    """
+    global discovery_running
+    discovery_running = True
+    
+    logger.info("Starting background trader discovery")
+    
+    # Initialize services
+    trader_discovery = None
+    ingestion_worker = None
+    
+    try:
+        trader_discovery = await get_trader_discovery()
+        ingestion_worker = DataIngestionWorker()
+        await ingestion_worker.initialize()
+        
+        discovery_interval = 7200  # 2 hours
+        
+        while discovery_running:
+            try:
+                logger.info("Running trader discovery cycle")
+                
+                # Discover new traders
+                discovered_traders = await trader_discovery.discover_top_traders(limit=20)
+                
+                if discovered_traders:
+                    logger.info(f"Discovered {len(discovered_traders)} potential traders")
+                    
+                    # Filter traders - only analyze those we haven't seen recently
+                    # For simplicity, analyze all for now (later can add DB filtering)
+                    
+                    successful_analyses = 0
+                    for trader in discovered_traders:
+                        try:
+                            wallet_address = trader['wallet_address']
+                            
+                            # Skip if we've analyzed this wallet recently (basic check)
+                            # This could be enhanced with database lookup
+                            
+                            logger.info(f"Starting 90-day analysis for trader: {wallet_address}")
+                            
+                            # Run 90-day analysis
+                            end_date = datetime.now(timezone.utc)
+                            start_date = end_date - timedelta(days=90)
+                            
+                            status = await ingestion_worker.process_wallet(
+                                wallet_address, start_date, end_date
+                            )
+                            
+                            if status.success:
+                                successful_analyses += 1
+                                logger.info(
+                                    f"Successfully analyzed trader {wallet_address}: "
+                                    f"{status.total_transactions_found} transactions, "
+                                    f"{status.valid_swaps_extracted} swaps"
+                                )
+                            else:
+                                logger.warning(f"Failed to analyze trader {wallet_address}: {status.error}")
+                            
+                            # Small delay between analyses to avoid overwhelming the system
+                            await asyncio.sleep(5)
+                                
+                        except Exception as e:
+                            logger.error(f"Error analyzing trader {trader.get('wallet_address', 'unknown')}: {e}")
+                            continue
+                    
+                    logger.info(f"Discovery cycle completed: {successful_analyses} traders analyzed successfully")
+                else:
+                    logger.warning("No traders discovered in this cycle")
+                
+                # Wait for next cycle
+                if discovery_running:
+                    logger.info(f"Sleeping for {discovery_interval} seconds until next discovery cycle")
+                    await asyncio.sleep(discovery_interval)
+                    
+            except asyncio.CancelledError:
+                logger.info("Background trader discovery cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in trader discovery cycle: {e}")
+                # Wait a bit before retrying
+                if discovery_running:
+                    await asyncio.sleep(300)  # 5 minutes backoff
+                    
+    except Exception as e:
+        logger.error(f"Failed to initialize background trader discovery: {e}")
+    finally:
+        discovery_running = False
+        if ingestion_worker:
+            await ingestion_worker.shutdown()
+        logger.info("Background trader discovery stopped")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
@@ -174,10 +276,29 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Failed to initialize scoring service", error=str(e))
     
+    # Start background trader discovery
+    global background_discovery_task
+    try:
+        background_discovery_task = asyncio.create_task(background_trader_discovery())
+        logger.info("Background trader discovery task started")
+    except Exception as e:
+        logger.error("Failed to start background trader discovery", error=str(e))
+    
     yield
     
     # Shutdown
     logger.info("Shutting down XORJ Quantitative Engine")
+    
+    # Stop background trader discovery
+    global discovery_running
+    discovery_running = False
+    if background_discovery_task:
+        background_discovery_task.cancel()
+        try:
+            await background_discovery_task
+        except asyncio.CancelledError:
+            logger.info("Background trader discovery task cancelled")
+    
     await close_all_clients()
     await close_calculation_service()
     await close_scoring_service()
@@ -204,7 +325,7 @@ app.add_middleware(
 
 
 # Authentication dependency
-async def verify_api_key(api_key: Optional[str] = None) -> bool:
+async def verify_api_key(api_key: Optional[str] = Header(None, alias="X-API-Key")) -> bool:
     """Verify API key for internal endpoints"""
     if settings.is_development:
         return True
@@ -942,107 +1063,16 @@ async def get_ranked_traders(
         try:
             logger.info("LIVE DATA: Using real mainnet trader data from database")
             
-            # Connect to database and get real trader data
-            import asyncpg
+            # Use the database service to get ranked traders properly
+            from .database.service import get_database_service
             
-            try:
-                conn = await asyncpg.connect(
-                    "postgresql://xorj:@localhost:5432/xorj_quant"
-                )
-                
-                # Check if we have seeded data, if not seed it
-                count_result = await conn.fetchval(
-                    "SELECT COUNT(*) FROM user_risk_profiles WHERE risk_profile IN ('conservative', 'moderate', 'aggressive')"
-                )
-                
-                if count_result < 3:
-                    logger.info("Seeding database with mainnet trader profiles")
-                    # Seed with real mainnet addresses
-                    seed_data = [
-                        ('5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1', 'aggressive', 25.0, 10, True),
-                        ('36c6VgswjHahVQrWvWkKZApW4GSmWy1VUcMHW1Kq7Vdr', 'moderate', 15.0, 8, True),
-                        ('CuieVDEDtLo7FypA9SbLM9saXFdb1dsshEkyErMqkRQq', 'conservative', 10.0, 5, True)
-                    ]
-                    
-                    for wallet, risk, max_pos, max_trades, auto_trading in seed_data:
-                        await conn.execute("""
-                            INSERT INTO user_risk_profiles 
-                            (user_id, wallet_address, risk_profile, max_position_size_sol, max_daily_trades, auto_trading_enabled)
-                            VALUES ($1, $2, $3, $4, $5, $6)
-                            ON CONFLICT (wallet_address) DO NOTHING
-                        """, f"user_{wallet[:8]}", wallet, risk, max_pos, max_trades, auto_trading)
-                
-                # Get trader data from database
-                rows = await conn.fetch("""
-                    SELECT wallet_address, risk_profile, max_position_size_sol, max_daily_trades
-                    FROM user_risk_profiles 
-                    WHERE auto_trading_enabled = true
-                    ORDER BY max_position_size_sol DESC
-                    LIMIT $1
-                """, limit or 100)
-                
-                await conn.close()
-                
-                # Convert database results to API format
-                traders_data = []
-                for i, row in enumerate(rows):
-                    # Calculate performance metrics based on risk profile and position size
-                    if row['risk_profile'] == 'aggressive':
-                        trust_score = 85.2 + (i * -3.1)
-                        roi = 28.5 + (i * -4.2)
-                        sharpe = 2.1 - (i * 0.3)
-                        volume = float(row['max_position_size_sol']) * 5000
-                    elif row['risk_profile'] == 'moderate':
-                        trust_score = 73.8 + (i * -2.8)
-                        roi = 22.1 + (i * -3.5)
-                        sharpe = 1.8 - (i * 0.2)
-                        volume = float(row['max_position_size_sol']) * 4200
-                    else:  # conservative
-                        trust_score = 68.5 + (i * -2.1)
-                        roi = 16.7 + (i * -2.8)
-                        sharpe = 1.5 - (i * 0.15)
-                        volume = float(row['max_position_size_sol']) * 3800
-                    
-                    trader_data = {
-                        "rank": i + 1,
-                        "wallet_address": row['wallet_address'],
-                        "trust_score": max(20.0, trust_score),
-                        "performance_breakdown": {
-                            "performance_score": trust_score * 0.007,
-                            "risk_penalty": max(0.0, (100 - trust_score) * 0.003)
-                        },
-                        "metrics": {
-                            "net_roi_percent": roi,
-                            "sharpe_ratio": sharpe,
-                            "maximum_drawdown_percent": abs(roi) * 0.35,
-                            "total_trades": row['max_daily_trades'] * 30,  # Monthly estimate
-                            "win_loss_ratio": 2.1 + (trust_score / 100),
-                            "total_volume_usd": volume,
-                            "total_profit_usd": volume * (roi / 100)
-                        }
-                    }
-                    
-                    if trader_data["trust_score"] >= min_trust_score:
-                        traders_data.append(trader_data)
-                
-                logger.info(f"LIVE DATA: Retrieved {len(traders_data)} traders from mainnet database")
-                
-            except Exception as db_error:
-                logger.error(f"Database error: {db_error}")
-                # Emergency fallback - return minimal working data
-                traders_data = [
-                    {
-                        "rank": 1,
-                        "wallet_address": "5Q544fKrFoe6tsEbD7S8EmxGTJYAKtTVhAW5Q5pge4j1",
-                        "trust_score": 85.2,
-                        "performance_breakdown": {"performance_score": 0.596, "risk_penalty": 0.044},
-                        "metrics": {
-                            "net_roi_percent": 28.5, "sharpe_ratio": 2.1, "maximum_drawdown_percent": 9.98,
-                            "total_trades": 300, "win_loss_ratio": 3.1, "total_volume_usd": 125000.0,
-                            "total_profit_usd": 35625.0
-                        }
-                    }
-                ]
+            db_service = await get_database_service()
+            traders_data = await db_service.get_ranked_traders(
+                limit=limit or 100,
+                min_trust_score=min_trust_score or 0.0
+            )
+            
+            logger.info(f"LIVE DATA: Retrieved {len(traders_data)} traders from database")
             
             # Convert to proper response format
             ranked_traders = []
@@ -1076,16 +1106,15 @@ async def get_ranked_traders(
                 "algorithm_version": "2.0.0",  # Updated version for real data
                 "data_source": "mainnet_blockchain",  # Now using real data
                 "eligibility_criteria": {
-                    "min_trading_days": 30,  # Real criteria
-                    "min_total_trades": 20,
-                    "min_volume_usd": 50000,
-                    "min_win_rate": 0.35
+                    "min_trading_days": 90,  # FR-3 specification: 90+ days required
+                    "min_total_trades": 50,  # FR-3 specification: 50+ trades required
+                    "max_single_day_roi_spike": "50%",  # FR-3 specification: no extreme spikes
+                    "anti_manipulation": "enabled"  # FR-3 specification: anti-manipulation checks
                 },
                 "scoring_weights": {
-                    "roi_weight": "30%",
-                    "volume_weight": "25%",
-                    "consistency_weight": "25%", 
-                    "activity_weight": "20%"
+                    "sharpe_weight": "40%",  # FR-3 specification: primary weight for risk-adjusted returns
+                    "roi_weight": "15%",     # FR-3 specification: secondary weight for raw returns
+                    "drawdown_penalty_weight": "45%"  # FR-3 specification: heavy penalty for max drawdown
                 }
             }
             

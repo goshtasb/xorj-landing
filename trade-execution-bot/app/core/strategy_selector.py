@@ -48,6 +48,11 @@ class TargetPortfolio:
     trust_score_threshold: Decimal
     selection_rationale: str
     
+    # User wallet information for vault operations
+    user_wallet_address: str
+    user_vault_address: str
+    user_id: str
+    
     # Portfolio allocation details
     target_allocation: Dict[str, Decimal]  # Token allocations
     risk_metrics: Dict[str, Any]  # Risk assessment metrics
@@ -459,7 +464,11 @@ class StrategySelector:
             trust_score_threshold=trust_score_threshold,
             selection_rationale=selection_rationale,
             target_allocation=target_allocation,
-            risk_metrics=risk_metrics
+            risk_metrics=risk_metrics,
+            # User wallet information for vault operations
+            user_wallet_address=user_profile.wallet_address,
+            user_vault_address=user_profile.vault_address or user_profile.wallet_address,
+            user_id=user_profile.user_id
         )
     
     def _create_allocation_from_trader(

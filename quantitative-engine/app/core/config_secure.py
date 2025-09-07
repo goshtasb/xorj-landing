@@ -185,9 +185,10 @@ class SecureSettings(BaseSettings):
     def solana_rpc_url(self) -> str:
         """Get Solana RPC URL - uses Helius if key available"""
         if self._helius_api_key:
-            env_suffix = "devnet" if self.environment == "development" else "mainnet-beta"
+            # Always use mainnet for trader discovery - we need real trading data
+            env_suffix = "mainnet-beta"
             return f"https://{env_suffix}.helius-rpc.com/?api-key={self._helius_api_key}"
-        return "https://api.devnet.solana.com"
+        return "https://api.mainnet-beta.solana.com"
     
     @property
     def jupiter_api_url(self) -> str:

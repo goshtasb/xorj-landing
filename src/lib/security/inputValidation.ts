@@ -41,7 +41,7 @@ export const SecurityValidationSchemas = {
     .finite('Trade amount must be finite'),
 
   // Risk profile validation
-  riskProfile: z.enum(['Conservative', 'Balanced', 'Aggressive'], {
+  riskProfile: z.enum(['conservative', 'moderate', 'aggressive', 'Conservative', 'Balanced', 'Aggressive'], {
     errorMap: () => ({ message: 'Invalid risk profile' })
   }),
 

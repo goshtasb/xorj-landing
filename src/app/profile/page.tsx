@@ -19,7 +19,7 @@ import { RiskProfileSelector } from '@/components/RiskProfileSelector';
 import { TransactionHistoryTable } from '@/components/TransactionHistoryTable';
 
 export default function ProfilePage() {
-  const { publicKey, connected } = useSimpleWallet();
+  const { publicKey, connected, authenticated, disconnect } = useSimpleWallet();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
 
@@ -44,13 +44,97 @@ export default function ProfilePage() {
     nodeEnv: process.env.NODE_ENV 
   });
 
-  // Always require wallet connection - no demo mode allowed
+  // Enhanced wallet connection monitoring with automatic logout
   useEffect(() => {
-    if (mounted && (!connected || !publicKey)) {
-      console.log('🚨 Profile page: No wallet connected, would redirect to home (disabled for debugging)');
-      // Temporarily disabled: router.push('/');
+    if (!mounted) return;
+
+    // Define logout helper function
+    const handleLogout = async (reason: string) => {
+      console.log(`🚨 Logging out user due to: ${reason}`);
+      try {
+        await disconnect();
+      } catch (error) {
+        console.error('Error during logout:', error);
+      }
+      router.push('/');
+    };
+
+    // Immediate check - redirect if wallet not connected
+    if (!connected || !publicKey) {
+      console.log('🚨 Profile page: No wallet connected, redirecting to home');
+      handleLogout('wallet disconnected');
+      return;
     }
-  }, [connected, publicKey, router, mounted]);
+
+    // Set up continuous monitoring for wallet connection
+    const checkWalletConnection = async () => {
+      if (!connected || !publicKey) {
+        console.log('🚨 Wallet connection lost during session, logging out user');
+        await handleLogout('wallet connection lost');
+        return false;
+      }
+      return true;
+    };
+
+    // Check authentication token validity
+    const checkAuthenticationStatus = async () => {
+      try {
+        const response = await fetch('/api/auth/validate', {
+          method: 'GET',
+          credentials: 'include',
+        });
+        
+        if (!response.ok || !authenticated) {
+          console.log('🚨 Authentication token expired or invalid, logging out user');
+          await handleLogout('authentication expired');
+          return false;
+        }
+        return true;
+      } catch (error) {
+        console.log('🚨 Authentication check failed, logging out user');
+        await handleLogout('authentication check failed');
+        return false;
+      }
+    };
+
+    // Check wallet connection every 5 seconds
+    const connectionMonitor = setInterval(() => {
+      checkWalletConnection();
+    }, 5000);
+
+    // Check authentication every 30 seconds
+    const authMonitor = setInterval(() => {
+      checkAuthenticationStatus();
+    }, 30000);
+
+    // Check wallet provider status more frequently
+    const walletStatusMonitor = setInterval(() => {
+      if (typeof window !== 'undefined' && window.phantom?.solana) {
+        const provider = window.phantom.solana;
+        
+        // Check if wallet is still connected at the provider level
+        if (!provider.isConnected) {
+          console.log('🚨 Phantom wallet provider disconnected, logging out user');
+          handleLogout('provider disconnected');
+          return;
+        }
+        
+        // Check if public key matches (wallet might have switched accounts)
+        if (provider.publicKey && publicKey && !provider.publicKey.equals(publicKey)) {
+          console.log('🚨 Wallet account changed, logging out user for re-authentication');
+          handleLogout('wallet account changed');
+          return;
+        }
+      }
+    }, 3000);
+
+    // Cleanup intervals
+    return () => {
+      clearInterval(connectionMonitor);
+      clearInterval(authMonitor);
+      clearInterval(walletStatusMonitor);
+    };
+  }, [connected, publicKey, authenticated, disconnect, router, mounted]);
 
   // Always show loading state initially to prevent hydration mismatch
   if (!mounted) {

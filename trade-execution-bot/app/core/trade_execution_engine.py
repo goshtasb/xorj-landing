@@ -33,7 +33,7 @@ class UserBotState:
                 "risk_profile": "moderate",
                 "slippage_tolerance": 1.0,
                 "enabled": True,
-                "max_trade_amount": 10000
+                "max_trade_amount": 10  # Default to $10 to match user setting
             }
         if self.last_execution is None:
             self.last_execution = datetime.now()

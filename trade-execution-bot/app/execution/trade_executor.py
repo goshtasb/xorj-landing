@@ -26,6 +26,7 @@ from app.security.confirmation_monitor import get_confirmation_monitor, Transact
 from app.security.circuit_breakers import get_circuit_breaker_manager, CircuitBreakerType
 from app.security.kill_switch import get_global_kill_switch
 from app.core.idempotency import get_idempotency_manager
+from app.database.trade_recorder import trade_recorder
 
 
 logger = structlog.get_logger(__name__)
@@ -75,6 +76,7 @@ class TradeExecutor:
         self.circuit_breaker_manager = None
         self.kill_switch = None
         self.idempotency_manager = None
+        self.trade_recorder = trade_recorder
         self.max_execution_time_seconds = 120
         self.simulation_required = False
         self.emergency_stop_active = False
@@ -88,13 +90,224 @@ class TradeExecutor:
         )
     
     async def initialize(self) -> bool:
-        # ... (initialization logic)
-        return True
+        """Initialize all trade executor components"""
+        try:
+            # Initialize trade recorder for database operations
+            if not await self.trade_recorder.initialize():
+                logger.error("Failed to initialize trade recorder")
+                return False
+            
+            logger.info("Trade executor initialization completed successfully")
+            return True
+        except Exception as e:
+            logger.error("Failed to initialize trade executor", error=str(e))
+            return False
 
     async def execute_trade(self, trade: GeneratedTrade) -> TradeExecutionResult:
+        """
+        Execute a single trade on-chain.
+        
+        Args:
+            trade: Generated trade to execute
+            
+        Returns:
+            TradeExecutionResult: Execution result with transaction details
+        """
         result = TradeExecutionResult(trade)
-        # ... (execution logic)
-        return result
+        start_time = datetime.now(timezone.utc)
+        
+        logger.info(
+            "Starting trade execution",
+            trade_id=trade.trade_id,
+            user_id=trade.user_id,
+            from_token=trade.swap_instruction.from_token_symbol,
+            to_token=trade.swap_instruction.to_token_symbol,
+            amount=str(trade.swap_instruction.from_amount)
+        )
+        
+        try:
+            # Step 1: Construct the swap transaction
+            transaction = await self._construct_swap_transaction(trade)
+            if not transaction:
+                result.error_message = "Failed to construct swap transaction"
+                result.final_status = TradeStatus.FAILED
+                logger.error(
+                    "Trade execution failed - transaction construction",
+                    trade_id=trade.trade_id,
+                    error=result.error_message
+                )
+                return result
+            
+            # Step 2: Simulate transaction (if enabled)
+            if self.simulation_required:
+                simulation_result = await self.solana_client.simulate_transaction(transaction)
+                if not simulation_result or simulation_result.get('error'):
+                    result.error_message = f"Transaction simulation failed: {simulation_result.get('error', 'Unknown error')}"
+                    result.final_status = TradeStatus.FAILED
+                    logger.error(
+                        "Trade execution failed - simulation",
+                        trade_id=trade.trade_id,
+                        error=result.error_message
+                    )
+                    return result
+            
+            # Step 3: Submit transaction to blockchain
+            signature = await self.solana_client.send_transaction(transaction)
+            if not signature:
+                result.error_message = "Failed to submit transaction to blockchain"
+                result.final_status = TradeStatus.FAILED
+                logger.error(
+                    "Trade execution failed - transaction submission", 
+                    trade_id=trade.trade_id,
+                    error=result.error_message
+                )
+                return result
+            
+            result.transaction_signature = signature
+            logger.info(
+                "Transaction submitted successfully",
+                trade_id=trade.trade_id,
+                signature=signature
+            )
+            
+            # Step 4: Wait for confirmation
+            confirmation_result = await self.solana_client.confirm_transaction(signature)
+            if not confirmation_result or confirmation_result.get('error'):
+                result.error_message = f"Transaction confirmation failed: {confirmation_result.get('error', 'Timeout')}"
+                result.final_status = TradeStatus.FAILED
+                logger.error(
+                    "Trade execution failed - confirmation",
+                    trade_id=trade.trade_id,
+                    signature=signature,
+                    error=result.error_message
+                )
+                return result
+            
+            # Step 5: Calculate execution metrics
+            end_time = datetime.now(timezone.utc)
+            result.execution_time_seconds = (end_time - start_time).total_seconds()
+            result.gas_used = confirmation_result.get('gas_used', 0)
+            result.success = True
+            result.final_status = TradeStatus.COMPLETED
+            
+            logger.info(
+                "Trade execution completed successfully",
+                trade_id=trade.trade_id,
+                user_id=trade.user_id,
+                signature=signature,
+                execution_time=result.execution_time_seconds,
+                gas_used=result.gas_used
+            )
+            
+            # Record successful trade to database for Transaction History
+            try:
+                await self.trade_recorder.record_trade_execution(trade, result)
+            except Exception as e:
+                logger.warning(
+                    "Failed to record successful trade to database",
+                    trade_id=trade.trade_id,
+                    error=str(e)
+                )
+            
+            return result
+            
+        except Exception as e:
+            end_time = datetime.now(timezone.utc)
+            result.execution_time_seconds = (end_time - start_time).total_seconds()
+            result.error_message = f"Trade execution exception: {str(e)}"
+            result.final_status = TradeStatus.FAILED
+            
+            logger.error(
+                "Trade execution failed with exception",
+                trade_id=trade.trade_id,
+                user_id=trade.user_id,
+                error=str(e),
+                error_type=type(e).__name__,
+                execution_time=result.execution_time_seconds
+            )
+            
+            # Record failed trade to database for Transaction History
+            try:
+                await self.trade_recorder.record_trade_attempt(trade, str(e))
+            except Exception as record_error:
+                logger.warning(
+                    "Failed to record failed trade to database",
+                    trade_id=trade.trade_id,
+                    error=str(record_error)
+                )
+            
+            return result
+    
+    async def execute_trade_batch(self, trades: List[GeneratedTrade], max_concurrent: int = 3) -> List[TradeExecutionResult]:
+        """
+        Execute a batch of trades sequentially.
+        
+        Args:
+            trades: List of trades to execute
+            max_concurrent: Maximum number of concurrent trades (default: 3)
+            
+        Returns:
+            List of execution results for each trade
+        """
+        if not trades:
+            logger.info("No trades to execute in batch")
+            return []
+        
+        logger.info(
+            "Starting batch trade execution", 
+            batch_size=len(trades),
+            trades=[t.trade_id for t in trades]
+        )
+        
+        results = []
+        
+        for i, trade in enumerate(trades):
+            try:
+                logger.info(
+                    "Executing trade in batch",
+                    trade_index=i + 1,
+                    total_trades=len(trades),
+                    trade_id=trade.trade_id,
+                    from_token=trade.swap_instruction.from_token_symbol,
+                    to_token=trade.swap_instruction.to_token_symbol,
+                    amount=str(trade.swap_instruction.from_amount)
+                )
+                
+                # Execute individual trade
+                result = await self.execute_trade(trade)
+                results.append(result)
+                
+                # Add small delay between trades to prevent rate limiting
+                if i < len(trades) - 1:  # Don't delay after last trade
+                    await asyncio.sleep(0.5)
+                    
+            except Exception as e:
+                logger.error(
+                    "Failed to execute trade in batch",
+                    trade_id=trade.trade_id,
+                    error=str(e),
+                    error_type=type(e).__name__
+                )
+                
+                # Create failed result
+                failed_result = TradeExecutionResult(trade)
+                failed_result.success = False
+                failed_result.error_message = f"Batch execution failed: {str(e)}"
+                failed_result.final_status = TradeStatus.FAILED
+                results.append(failed_result)
+        
+        successful_trades = sum(1 for r in results if r.success)
+        failed_trades = len(results) - successful_trades
+        
+        logger.info(
+            "Batch trade execution completed",
+            total_trades=len(trades),
+            successful_trades=successful_trades,
+            failed_trades=failed_trades,
+            success_rate=f"{(successful_trades/len(trades)*100):.1f}%" if trades else "0%"
+        )
+        
+        return results
 
     async def _construct_swap_transaction(self, trade: GeneratedTrade) -> Optional[Transaction]:
         logger.info(
