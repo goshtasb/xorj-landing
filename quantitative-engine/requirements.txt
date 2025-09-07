@@ -12,3 +12,5 @@ redis==5.0.1
 python-dotenv==1.0.0
 gunicorn==21.2.0
 structlog==23.2.0
+solana==0.32.0
+base58==2.1.1
